@@ -39,10 +39,16 @@ import {
   School,
   ShieldCheck,
   UserCheck,
-  Edit2
+  Edit2,
+  Cloud,
+  CloudOff,
+  Zap,
+  RotateCcw,
+  Info
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
+import { registerSW } from 'virtual:pwa-register';
 import { 
   BarChart, 
   Bar, 
@@ -68,6 +74,18 @@ const MASTER_PIN = '2026ADMIN'; // Default master pin
 // --- Types ---
 interface Config {
   census: number;
+  adminPin?: string;
+  sessionStatus: 'waiting' | 'active' | 'ended';
+  sessionStart?: any;
+  sessionEnd?: any;
+  initialSnapshot?: {
+    totalVotes: number;
+    mesas: { [id: string]: number };
+  };
+  finalSnapshot?: {
+    totalVotes: number;
+    mesas: { [id: string]: number };
+  };
 }
 interface Candidate {
   id: string;
@@ -104,14 +122,93 @@ interface VoteRecord {
   voterId: string;
 }
 
+// --- PWA Status Component ---
+const PWAStatus = () => {
+  const [offlineReady, setOfflineReady] = useState(false);
+  const [needRefresh, setNeedRefresh] = useState(false);
+  const [updateSW, setUpdateSW] = useState<((reloadPage?: boolean) => Promise<void>) | null>(null);
+
+  useEffect(() => {
+    const update = registerSW({
+      onRegistered(r) {
+        console.log('SW Registered');
+      },
+      onRegisterError(error) {
+        console.error('SW registration error', error);
+      },
+      onOfflineReady() {
+        setOfflineReady(true);
+      },
+      onNeedRefresh() {
+        setNeedRefresh(true);
+      },
+    });
+    setUpdateSW(() => update);
+  }, []);
+
+  const close = () => {
+    setOfflineReady(false);
+    setNeedRefresh(false);
+  };
+
+  return (
+    <>
+      <AnimatePresence>
+        {offlineReady && (
+          <motion.div 
+            initial={{ y: -100, opacity: 0 }} 
+            animate={{ y: 0, opacity: 1 }} 
+            exit={{ y: -100, opacity: 0 }}
+            className="fixed top-4 right-4 z-[100] bg-green-500 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 font-bold"
+          >
+            <Zap size={20} className="animate-pulse" />
+            <span>¡Listo para usar sin internet!</span>
+            <button onClick={close} className="ml-2 hover:opacity-70">✕</button>
+          </motion.div>
+        )}
+        {needRefresh && (
+          <motion.div 
+            initial={{ y: -100, opacity: 0 }} 
+            animate={{ y: 0, opacity: 1 }} 
+            exit={{ y: -100, opacity: 0 }}
+            className="fixed top-4 right-4 z-[100] bg-indigo-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex flex-col gap-2 min-w-[280px]"
+          >
+            <div className="flex items-center gap-3 font-bold">
+              <Cloud size={20} />
+              <span>Nueva versión disponible</span>
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => updateSW && updateSW(true)}
+                className="bg-white text-indigo-600 px-4 py-1.5 rounded-xl text-sm font-bold hover:bg-slate-100 transition-colors"
+              >
+                Actualizar ahora
+              </button>
+              <button onClick={close} className="text-white/70 text-sm font-bold px-2">Cerrar</button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* Small persistent indicator when offline ready */}
+      {offlineReady && (
+        <div className="fixed bottom-4 left-4 z-[40] bg-white/10 backdrop-blur-md text-white/40 px-3 py-1 rounded-full text-[10px] font-bold flex items-center gap-2 pointer-events-none">
+          <Zap size={10} />
+          MODO OFFLINE ACTIVADO
+        </div>
+      )}
+    </>
+  );
+};
+
 // --- Components ---
 
 const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [votes, setVotes] = useState<VoteRecord[]>([]);
   const [mesas, setMesas] = useState<Mesa[]>([]);
-  const [config, setConfig] = useState<Config>({ census: 500, adminPin: MASTER_PIN });
-  const [activeTab, setActiveTab] = useState<'candidates' | 'results' | 'mesas' | 'settings'>('results');
+  const [config, setConfig] = useState<Config>({ census: 500, adminPin: MASTER_PIN, sessionStatus: 'waiting' });
+  const [activeTab, setActiveTab] = useState<'candidates' | 'results' | 'mesas' | 'settings' | 'jornada'>('results');
   const [isAddingCandidate, setIsAddingCandidate] = useState(false);
   const [newCandidate, setNewCandidate] = useState<Partial<Candidate>>({ position: 'personeria' });
   const [isAddingMesa, setIsAddingMesa] = useState(false);
@@ -166,16 +263,48 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
     setIsAddingCandidate(true);
   };
 
-  const handleUpdateConfig = async () => {
+  const handleUpdateConfig = async (newConfig: Partial<Config>) => {
     setIsSaving(true);
     try {
-      await setDoc(doc(db, 'config', 'general'), config);
+      await setDoc(doc(db, 'config', 'general'), { ...config, ...newConfig });
       toast.success('Configuración actualizada correctamente.');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'config/general');
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const startSession = async () => {
+    if (!window.confirm('¿Estás seguro de iniciar la jornada de votación? Se tomará un reporte inicial de la base de datos.')) return;
+    
+    const initialSnapshot = {
+      totalVotes: votes.length,
+      mesas: mesas.reduce((acc, m) => ({ ...acc, [m.id]: m.voterCount || 0 }), {})
+    };
+
+    await handleUpdateConfig({
+      sessionStatus: 'active',
+      sessionStart: serverTimestamp(),
+      initialSnapshot
+    });
+    toast.success('Jornada de votación iniciada.');
+  };
+
+  const endSession = async () => {
+    if (!window.confirm('¿Estás seguro de finalizar la jornada de votación? Se tomará un reporte final y se bloquearán nuevos votos.')) return;
+
+    const finalSnapshot = {
+      totalVotes: votes.length,
+      mesas: mesas.reduce((acc, m) => ({ ...acc, [m.id]: m.voterCount || 0 }), {})
+    };
+
+    await handleUpdateConfig({
+      sessionStatus: 'ended',
+      sessionEnd: serverTimestamp(),
+      finalSnapshot
+    });
+    toast.success('Jornada de votación finalizada.');
   };
 
   const handleAddAdminEmail = async (e: React.FormEvent) => {
@@ -331,6 +460,15 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
       ? votes 
       : votes.filter(v => v.mesaId === selectedMesaFilter);
 
+    const selectedMesa = selectedMesaFilter === 'all' ? null : mesas.find(m => m.id === selectedMesaFilter);
+
+    if (selectedMesa) {
+      doc.setFontSize(12);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Filtrado por Mesa: ${selectedMesa.name} (Grado ${selectedMesa.grade})`, pageWidth / 2, 44, { align: 'center' });
+      currentY = 55;
+    }
+
     const checkPageBreak = (neededHeight: number) => {
       if (currentY + neededHeight > 270) {
         doc.addPage();
@@ -368,7 +506,7 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
 
       doc.setFontSize(12);
       doc.setTextColor(79, 70, 229);
-      doc.text(`Grado ${grade} - Ganador: ${winner}`, 14, currentY);
+      doc.text(`Grado ${grade}`, 14, currentY);
       currentY += 8;
 
       const tableData = data.map(c => [c.name, c.votes]);
@@ -381,7 +519,13 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
         margin: { left: 14, right: 14 }
       });
 
-      currentY = (doc as any).lastAutoTable.finalY + 15;
+      currentY = (doc as any).lastAutoTable.finalY + 5;
+      doc.setFontSize(10);
+      doc.setTextColor(30, 41, 59);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`GANADOR: ${winner}`, 14, currentY);
+      doc.setFont('helvetica', 'normal');
+      currentY += 15;
     }
 
     // 2. CONSEJO GENERAL
@@ -431,14 +575,9 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
     }));
     const contraloriaBlanco = filteredVotes.filter(v => v.position === 'contraloria' && v.candidateId === 'blanco').length;
     contraloriaData.push({ name: 'Voto en Blanco', grade: '-', votes: contraloriaBlanco });
-    contraloriaData.sort((a, b) => {
-      if (a.name === 'Voto en Blanco') return 1;
-      if (b.name === 'Voto en Blanco') return -1;
-      const gradeA = GRADES.indexOf(a.grade);
-      const gradeB = GRADES.indexOf(b.grade);
-      if (gradeA !== gradeB) return gradeA - gradeB;
-      return b.votes - a.votes;
-    });
+    contraloriaData.sort((a, b) => b.votes - a.votes);
+
+    const contraloriaWinner = contraloriaData[0]?.votes > 0 ? contraloriaData[0].name : 'Empate / Sin votos';
 
     autoTable(doc, {
       startY: currentY,
@@ -447,7 +586,13 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
       theme: 'striped',
       headStyles: { fillColor: [79, 70, 229] }
     });
-    currentY = (doc as any).lastAutoTable.finalY + 20;
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+    doc.setFontSize(10);
+    doc.setTextColor(30, 41, 59);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`GANADOR CONTRALORÍA: ${contraloriaWinner}`, 14, currentY);
+    doc.setFont('helvetica', 'normal');
+    currentY += 15;
 
     // 4. PERSONERÍA
     checkPageBreak(50);
@@ -464,14 +609,9 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
     }));
     const personeriaBlanco = filteredVotes.filter(v => v.position === 'personeria' && v.candidateId === 'blanco').length;
     personeriaData.push({ name: 'Voto en Blanco', grade: '-', votes: personeriaBlanco });
-    personeriaData.sort((a, b) => {
-      if (a.name === 'Voto en Blanco') return 1;
-      if (b.name === 'Voto en Blanco') return -1;
-      const gradeA = GRADES.indexOf(a.grade);
-      const gradeB = GRADES.indexOf(b.grade);
-      if (gradeA !== gradeB) return gradeA - gradeB;
-      return b.votes - a.votes;
-    });
+    personeriaData.sort((a, b) => b.votes - a.votes);
+
+    const personeriaWinner = personeriaData[0]?.votes > 0 ? personeriaData[0].name : 'Empate / Sin votos';
 
     autoTable(doc, {
       startY: currentY,
@@ -480,7 +620,52 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
       theme: 'striped',
       headStyles: { fillColor: [79, 70, 229] }
     });
-    currentY = (doc as any).lastAutoTable.finalY + 20;
+    currentY = (doc as any).lastAutoTable.finalY + 5;
+    doc.setFontSize(10);
+    doc.setTextColor(30, 41, 59);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`GANADOR PERSONERÍA: ${personeriaWinner}`, 14, currentY);
+    doc.setFont('helvetica', 'normal');
+    currentY += 15;
+
+    // 5. REPORTE DE JORNADA
+    checkPageBreak(60);
+    doc.setFontSize(16);
+    doc.setTextColor(30, 41, 59);
+    doc.text('5. REPORTE DE JORNADA', 14, currentY);
+    currentY += 10;
+
+    doc.setFontSize(10);
+    doc.text(`Estado de la Sesión: ${config.sessionStatus === 'active' ? 'ACTIVA' : config.sessionStatus === 'ended' ? 'FINALIZADA' : 'ESPERANDO'}`, 14, currentY);
+    currentY += 5;
+    if (config.sessionStart) {
+      doc.text(`Inicio: ${new Date(config.sessionStart.seconds * 1000).toLocaleString()}`, 14, currentY);
+      currentY += 5;
+    }
+    if (config.sessionEnd) {
+      doc.text(`Fin: ${new Date(config.sessionEnd.seconds * 1000).toLocaleString()}`, 14, currentY);
+      currentY += 5;
+    }
+
+    if (config.initialSnapshot) {
+      currentY += 5;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Snapshot Inicial (Votos al comenzar):', 14, currentY);
+      doc.setFont('helvetica', 'normal');
+      currentY += 5;
+      doc.text(`Total Votos: ${config.initialSnapshot.totalVotes}`, 14, currentY);
+      currentY += 5;
+    }
+
+    if (config.finalSnapshot) {
+      currentY += 5;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Snapshot Final (Votos al terminar):', 14, currentY);
+      doc.setFont('helvetica', 'normal');
+      currentY += 5;
+      doc.text(`Total Votos: ${config.finalSnapshot.totalVotes}`, 14, currentY);
+      currentY += 5;
+    }
 
     // Signatures
     checkPageBreak(40);
@@ -726,6 +911,12 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
           Resultados
         </button>
         <button 
+          onClick={() => setActiveTab('jornada')}
+          className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'jornada' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+        >
+          Jornada
+        </button>
+        <button 
           onClick={() => setActiveTab('candidates')}
           className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'candidates' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
         >
@@ -916,6 +1107,102 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
           </div>
         )}
 
+        {activeTab === 'jornada' && (
+          <div className="max-w-4xl space-y-8">
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+              <div className="flex items-center gap-4 mb-8">
+                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${
+                  config.sessionStatus === 'active' ? 'bg-green-100 text-green-600' : 
+                  config.sessionStatus === 'ended' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  <Zap size={32} />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-black text-slate-900">Control de Jornada Electoral</h2>
+                  <p className="text-slate-500">Administra el inicio y fin de las votaciones</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Estado Actual</p>
+                  <p className={`text-xl font-black ${
+                    config.sessionStatus === 'active' ? 'text-green-600' : 
+                    config.sessionStatus === 'ended' ? 'text-red-600' : 'text-slate-600'
+                  }`}>
+                    {config.sessionStatus === 'active' ? 'EN PROGRESO' : 
+                     config.sessionStatus === 'ended' ? 'FINALIZADA' : 'EN ESPERA'}
+                  </p>
+                </div>
+                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Inicio</p>
+                  <p className="text-xl font-black text-slate-900">
+                    {config.sessionStart ? new Date(config.sessionStart.seconds * 1000).toLocaleTimeString() : '--:--'}
+                  </p>
+                </div>
+                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Fin</p>
+                  <p className="text-xl font-black text-slate-900">
+                    {config.sessionEnd ? new Date(config.sessionEnd.seconds * 1000).toLocaleTimeString() : '--:--'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-4">
+                {config.sessionStatus === 'waiting' && (
+                  <button 
+                    onClick={startSession}
+                    className="flex-1 min-w-[200px] py-4 bg-green-600 text-white rounded-2xl font-bold hover:bg-green-700 transition-all shadow-lg shadow-green-100 flex items-center justify-center gap-3"
+                  >
+                    <Zap size={20} />
+                    Iniciar Jornada
+                  </button>
+                )}
+                {config.sessionStatus === 'active' && (
+                  <button 
+                    onClick={endSession}
+                    className="flex-1 min-w-[200px] py-4 bg-red-600 text-white rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100 flex items-center justify-center gap-3"
+                  >
+                    <LogOut size={20} />
+                    Finalizar Jornada
+                  </button>
+                )}
+                {(config.sessionStatus === 'ended' || config.sessionStatus === 'active') && (
+                  <button 
+                    onClick={() => {
+                      if (window.confirm('¿Estás seguro de resetear la jornada? Esto borrará los tiempos y snapshots (pero NO los votos).')) {
+                        handleUpdateConfig({
+                          sessionStatus: 'waiting',
+                          sessionStart: null,
+                          sessionEnd: null,
+                          initialSnapshot: null,
+                          finalSnapshot: null
+                        });
+                      }
+                    }}
+                    className="flex-1 min-w-[200px] py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-3"
+                  >
+                    <RotateCcw size={20} />
+                    Resetear Jornada
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-indigo-50 p-8 rounded-3xl border border-indigo-100">
+              <h3 className="text-lg font-bold text-indigo-900 mb-4 flex items-center gap-2">
+                <Info size={20} />
+                Información de Auditoría
+              </h3>
+              <div className="space-y-4 text-sm text-indigo-700">
+                <p>• Al <b>Iniciar</b>, se guarda un "Snapshot" con el total de votos actual y el estado de cada mesa.</p>
+                <p>• Al <b>Finalizar</b>, se bloquean las mesas de votación y se guarda el "Snapshot" final.</p>
+                <p>• Estos datos aparecerán en el reporte PDF final para garantizar la transparencia del proceso.</p>
+              </div>
+            </div>
+          </div>
+        )}
+        
         {activeTab === 'candidates' && (
           <div className="space-y-6">
             <div className="flex justify-between items-center">
@@ -1457,7 +1744,7 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
   );
 };
 
-const StudentVoting = () => {
+const StudentVoting = ({ config }: { config: Config }) => {
   const [step, setStep] = useState<'setup' | 'start' | 'consejo' | 'contraloria' | 'personeria' | 'success'>('setup');
   const [selectedMesa, setSelectedMesa] = useState<Mesa | null>(null);
   const [mesas, setMesas] = useState<Mesa[]>([]);
@@ -1603,6 +1890,34 @@ const StudentVoting = () => {
     }
   };
 
+  if (config.sessionStatus !== 'active' && step !== 'setup') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4 text-center">
+        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="max-w-md bg-white p-12 rounded-3xl shadow-2xl">
+          <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${
+            config.sessionStatus === 'ended' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'
+          }`}>
+            {config.sessionStatus === 'ended' ? <LogOut size={40} /> : <Settings size={40} />}
+          </div>
+          <h1 className="text-3xl font-bold text-slate-900 mb-4">
+            {config.sessionStatus === 'ended' ? 'Votación Finalizada' : 'Votación no Iniciada'}
+          </h1>
+          <p className="text-slate-600 mb-8">
+            {config.sessionStatus === 'ended' 
+              ? 'La jornada electoral ha concluido. Gracias por participar.' 
+              : 'La jornada electoral aún no ha comenzado. Por favor, espera instrucciones del moderador.'}
+          </p>
+          <button 
+            onDoubleClick={() => setIsResettingMesa(true)}
+            className="text-slate-300 hover:text-slate-500 transition-colors text-xs"
+          >
+            Configurar Mesa
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
   if (step === 'setup') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
@@ -1648,8 +1963,9 @@ const StudentVoting = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-indigo-600 p-4 relative">
         <button 
-          onDoubleClick={() => setIsResettingMesa(true)}
+          onClick={() => setIsResettingMesa(true)}
           className="absolute top-8 left-8 text-white/20 hover:text-white/50 transition-colors"
+          title="Resetear Mesa"
         >
           <School size={32} />
         </button>
@@ -1702,12 +2018,14 @@ const StudentVoting = () => {
   }
 
   const currentPosition = step as 'personeria' | 'contraloria' | 'consejo';
-  const filteredCandidates = candidates.filter(c => {
-    if (currentPosition === 'consejo') {
-      return c.position === 'consejo' && c.grade === selectedMesa?.grade;
-    }
-    return c.position === currentPosition;
-  });
+  const filteredCandidates = candidates
+    .filter(c => {
+      if (currentPosition === 'consejo') {
+        return c.position === 'consejo' && c.grade === selectedMesa?.grade;
+      }
+      return c.position === currentPosition;
+    })
+    .sort((a, b) => a.number - b.number);
 
   const getStepNumber = () => {
     if (step === 'consejo') return 1;
@@ -1733,7 +2051,7 @@ const StudentVoting = () => {
           <p className="text-slate-500">Selecciona a tu candidato preferido de la lista</p>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4">
           {filteredCandidates.map(c => (
             <motion.button
               key={c.id}
@@ -1741,23 +2059,23 @@ const StudentVoting = () => {
               whileHover={!isProcessing ? { y: -5 } : {}}
               whileTap={!isProcessing ? { scale: 0.98 } : {}}
               onClick={() => handleVote(c.id, currentPosition)}
-              className={`bg-white rounded-3xl overflow-hidden shadow-sm border-2 border-transparent transition-all text-left group ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:border-indigo-600'}`}
+              className={`bg-white rounded-xl overflow-hidden shadow-sm border-2 border-transparent transition-all text-left group flex flex-col ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:border-indigo-600'}`}
             >
-              <div className="aspect-square bg-slate-100 relative">
+              <div className="aspect-square bg-slate-100 relative overflow-hidden">
                 {c.photoUrl ? (
                   <img src={c.photoUrl} alt={c.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-slate-300">
-                    <UserIcon size={80} />
+                    <UserIcon size={40} />
                   </div>
                 )}
-                <div className="absolute top-4 right-4 w-12 h-12 bg-white rounded-2xl shadow-lg flex items-center justify-center font-black text-2xl text-indigo-600">
+                <div className="absolute top-1 right-1 w-7 h-7 bg-white/90 backdrop-blur-sm rounded-lg shadow-md flex items-center justify-center font-black text-base text-indigo-600">
                   {c.number}
                 </div>
               </div>
-              <div className="p-6">
-                <h3 className={`text-xl font-bold text-slate-900 transition-colors ${!isProcessing && 'group-hover:text-indigo-600'}`}>{c.name}</h3>
-                <p className="text-slate-500 text-sm">Candidato # {c.number}</p>
+              <div className="p-2 md:p-3 flex-1 flex flex-col justify-center">
+                <h3 className={`text-xs md:text-sm font-bold text-slate-900 leading-tight transition-colors line-clamp-2 ${!isProcessing && 'group-hover:text-indigo-600'}`}>{c.name}</h3>
+                <p className="text-slate-500 text-[9px] md:text-[10px] mt-1">Candidato #{c.number}</p>
               </div>
             </motion.button>
           ))}
@@ -1768,13 +2086,13 @@ const StudentVoting = () => {
             whileHover={!isProcessing ? { y: -5 } : {}}
             whileTap={!isProcessing ? { scale: 0.98 } : {}}
             onClick={() => handleVote('blanco', currentPosition)}
-            className={`bg-white rounded-3xl overflow-hidden shadow-sm border-2 border-transparent transition-all text-left flex flex-col items-center justify-center p-8 min-h-[300px] ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:border-slate-400'}`}
+            className={`bg-white rounded-xl overflow-hidden shadow-sm border-2 border-transparent transition-all text-left flex flex-col items-center justify-center p-3 md:p-4 min-h-[140px] ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:border-slate-400'}`}
           >
-            <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mb-4">
-              <Plus size={40} className="rotate-45" />
+            <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mb-2">
+              <Plus size={20} className="rotate-45" />
             </div>
-            <h3 className="text-xl font-bold text-slate-900">Voto en Blanco</h3>
-            <p className="text-slate-500 text-sm">Ninguno de los anteriores</p>
+            <h3 className="text-xs md:text-sm font-bold text-slate-900 text-center">Voto en Blanco</h3>
+            <p className="text-slate-500 text-[9px] md:text-[10px] text-center mt-1">Ninguno</p>
           </motion.button>
         </div>
       </div>
@@ -1894,6 +2212,7 @@ export default function App() {
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isAdminView, setIsAdminView] = useState(false);
+  const [config, setConfig] = useState<Config>({ census: 500, adminPin: MASTER_PIN, sessionStatus: 'waiting' });
 
   useEffect(() => {
     // Check URL hash for view separation
@@ -1957,6 +2276,21 @@ export default function App() {
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    const unsubConfig = onSnapshot(doc(db, 'config', 'general'), (snap) => {
+      if (snap.exists()) {
+        setConfig(snap.data() as Config);
+      } else {
+        // Initialize config if it doesn't exist
+        setDoc(doc(db, 'config', 'general'), { census: 500, sessionStatus: 'waiting' })
+          .catch(err => console.error("Error initializing config:", err));
+      }
+    }, (err) => {
+      console.warn("Config listener error:", err);
+    });
+    return unsubConfig;
+  }, []);
+
   const handleAdminLogin = async () => {
     const provider = new GoogleAuthProvider();
     try {
@@ -1965,23 +2299,6 @@ export default function App() {
       console.error(err);
     }
   };
-
-  const [config, setConfig] = useState<Config>({ census: 500, adminPin: MASTER_PIN });
-
-  useEffect(() => {
-    const unsubConfig = onSnapshot(doc(db, 'config', 'general'), (snap) => {
-      if (snap.exists()) {
-        setConfig(snap.data() as Config);
-      } else {
-        // Initialize config if it doesn't exist
-        setDoc(doc(db, 'config', 'general'), { census: 500 })
-          .catch(err => console.error("Error initializing config:", err));
-      }
-    }, (err) => {
-      console.warn("Config listener error:", err);
-    });
-    return unsubConfig;
-  }, []);
 
   if (loading) {
     return (
@@ -2059,11 +2376,12 @@ export default function App() {
     }
 
     // Student View (Default)
-    return <StudentVoting />;
+    return <StudentVoting config={config} />;
   };
 
   return (
     <ErrorBoundary>
+      <PWAStatus />
       {renderContent()}
     </ErrorBoundary>
   );
