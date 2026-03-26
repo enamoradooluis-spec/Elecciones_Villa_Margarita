@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "Candidate": {
+      "title": "Candidate",
+      "description": "A candidate for the school election.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Candidate's full name." },
+        "photoUrl": { "type": "string", "description": "URL to the candidate's photo." },
+        "position": { "type": "string", "enum": ["personeria", "contraloria", "consejo"], "description": "Position the candidate is running for." },
+        "grade": { "type": "string", "description": "Grade the candidate belongs to (relevant for consejo)." },
+        "number": { "type": "number", "description": "Candidate's number on the ballot." }
+      },
+      "required": ["name", "position", "number"]
+    },
+    "Vote": {
+      "title": "Vote",
+      "description": "A single vote cast by a student.",
+      "type": "object",
+      "properties": {
+        "candidateId": { "type": "string", "description": "ID of the candidate voted for." },
+        "position": { "type": "string", "enum": ["personeria", "contraloria", "consejo"], "description": "Position the vote is for." },
+        "grade": { "type": "string", "description": "Grade of the student who cast the vote." },
+        "mesaId": { "type": "string", "description": "ID of the table where the vote was cast." },
+        "mesaName": { "type": "string", "description": "Name of the table where the vote was cast." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the vote was cast." },
+        "voterId": { "type": "string", "description": "ID of the voter (to prevent duplicates)." }
+      },
+      "required": ["candidateId", "position", "grade", "timestamp", "voterId"]
+    },
+    "Mesa": {
+      "title": "Mesa",
+      "description": "A voting table assigned to a grade.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the table (e.g., Mesa 1)." },
+        "grade": { "type": "string", "description": "Grade assigned to this table." },
+        "pin": { "type": "string", "description": "PIN to lock/unlock the device to this table." }
+      },
+      "required": ["name", "grade", "pin"]
+    },
+    "Voter": {
+      "title": "Voter",
+      "description": "A student eligible to vote.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Student's name." },
+        "grade": { "type": "string", "description": "Student's grade." },
+        "hasVoted": { "type": "boolean", "description": "Whether the student has already voted." }
+      },
+      "required": ["name", "grade", "hasVoted"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Application user (admin).",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "User's email." },
+        "role": { "type": "string", "enum": ["admin", "voter"], "description": "User's role." }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/candidates/{candidateId}": {
+      "schema": "Candidate",
+      "description": "Collection of candidates."
+    },
+    "/votes/{voteId}": {
+      "schema": "Vote",
+      "description": "Collection of votes cast."
+    },
+    "/voters/{voterId}": {
+      "schema": "Voter",
+      "description": "Collection of eligible voters."
+    },
+    "/mesas/{mesaId}": {
+      "schema": "Mesa",
+      "description": "Collection of voting tables."
+    },
+    "/config/{docId}": {
+      "schema": "object",
+      "description": "General application configuration."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of application users."
+    }
+  }
+}
