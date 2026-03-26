@@ -38,8 +38,11 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const isQuotaError = errorMessage.includes('Quota exceeded') || errorMessage.includes('quota limit');
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -57,5 +60,13 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path
   }
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+  
+  if (isQuotaError) {
+    // We can't use toast here easily without importing it, 
+    // but we can at least ensure the error message is clear for the ErrorBoundary
+    const quotaMessage = "Límite de cuota excedido. La base de datos gratuita ha alcanzado su límite diario de lecturas. El sistema se restablecerá mañana.";
+    throw new Error(JSON.stringify({ ...errInfo, error: quotaMessage, isQuota: true }));
+  }
+
   throw new Error(JSON.stringify(errInfo));
 }

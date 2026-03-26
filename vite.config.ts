@@ -12,24 +12,31 @@ export default defineConfig(({mode}) => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
+        injectRegister: 'auto',
+        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
         devOptions: {
-          enabled: true
+          enabled: true,
+          type: 'module'
         },
         manifest: {
           name: 'Elecciones Villa Margarita 2026',
           short_name: 'Elecciones',
           description: 'Aplicación de votación para Villa Margarita',
-          theme_color: '#ffffff',
+          theme_color: '#4f46e5',
+          background_color: '#ffffff',
+          display: 'standalone',
           icons: [
             {
               src: 'https://picsum.photos/seed/elecciones/192/192',
               sizes: '192x192',
-              type: 'image/png'
+              type: 'image/png',
+              purpose: 'any maskable'
             },
             {
               src: 'https://picsum.photos/seed/elecciones/512/512',
               sizes: '512x512',
-              type: 'image/png'
+              type: 'image/png',
+              purpose: 'any maskable'
             }
           ]
         }
