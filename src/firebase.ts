@@ -1,11 +1,11 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
+import { initializeFirestore, memoryLocalCache, getDocFromCache, getDocsFromCache } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()}),
+  localCache: memoryLocalCache(),
 }, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 
@@ -22,6 +22,7 @@ export interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
+  isQuota?: boolean;
   authInfo: {
     userId: string | undefined;
     email: string | null | undefined;
@@ -37,9 +38,11 @@ export interface FirestoreErrorInfo {
   }
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+export { getDocFromCache, getDocsFromCache };
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, shouldThrow = true) {
   const errorMessage = error instanceof Error ? error.message : String(error);
-  const isQuotaError = errorMessage.includes('Quota exceeded') || errorMessage.includes('quota limit');
+  const isQuotaError = errorMessage.includes('Quota exceeded') || errorMessage.includes('quota limit') || errorMessage.includes('resource-exhausted');
 
   const errInfo: FirestoreErrorInfo = {
     error: errorMessage,
@@ -62,11 +65,15 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   
   if (isQuotaError) {
-    // We can't use toast here easily without importing it, 
-    // but we can at least ensure the error message is clear for the ErrorBoundary
     const quotaMessage = "Límite de cuota excedido. La base de datos gratuita ha alcanzado su límite diario de lecturas. El sistema se restablecerá mañana.";
-    throw new Error(JSON.stringify({ ...errInfo, error: quotaMessage, isQuota: true }));
+    if (shouldThrow) {
+      throw new Error(JSON.stringify({ ...errInfo, error: quotaMessage, isQuota: true }));
+    }
+    return { ...errInfo, error: quotaMessage, isQuota: true };
   }
 
-  throw new Error(JSON.stringify(errInfo));
+  if (shouldThrow) {
+    throw new Error(JSON.stringify(errInfo));
+  }
+  return errInfo;
 }

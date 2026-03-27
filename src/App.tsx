@@ -13,7 +13,8 @@ import {
   getDoc,
   setDoc,
   increment,
-  getDocFromServer
+  getDocFromServer,
+  writeBatch
 } from 'firebase/firestore';
 import { 
   signInWithPopup, 
@@ -23,7 +24,7 @@ import {
   User as FirebaseUser,
   signInAnonymously
 } from 'firebase/auth';
-import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { db, auth, handleFirestoreError, OperationType, getDocFromCache, getDocsFromCache } from './firebase';
 import { 
   Vote, 
   User as UserIcon, 
@@ -48,6 +49,9 @@ import {
   Home as HomeIcon,
   ArrowLeft,
   AlertTriangle,
+  LayoutGrid,
+  Database,
+  Layout,
   AlertCircle
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
@@ -74,6 +78,83 @@ import autoTable from 'jspdf-autotable';
 // --- Constants ---
 const GRADES = ['3°', '4°', '5°', '6°', '7°', '8°', '9°', '10°', '11°'];
 const MASTER_PIN = '2026ADMIN'; // Default master pin
+
+const INITIAL_MESAS = [
+  { name: "Mesa 01 - Principal", grade: "7°", pin: "sp07" },
+  { name: "Mesa 02 - Principal", grade: "8°", pin: "SP08" },
+  { name: "Mesa 03 - Pricipal", grade: "9°", pin: "sp09" },
+  { name: "Mesa 04 - Principal", grade: "10°", pin: "sp10" },
+  { name: "Mesa 05 - Principal", grade: "11°", pin: "sp11" },
+  { name: "Mesa 06 - Principal", grade: "4°", pin: "sp04" },
+  { name: "Mesa 07 - Principal", grade: "5°", pin: "sp05" },
+  { name: "Mesa 01 - 2 de septiembre", grade: "3°", pin: "ds03" },
+  { name: "Mesa 02 - 2 de septiembre", grade: "3°", pin: "ds03" },
+  { name: "Mesa 01 - Alfonso Lopez", grade: "3°", pin: "al03" },
+  { name: "Mesa 02 - Alfonso Lopez", grade: "6°", pin: "al06" }
+];
+
+const INITIAL_CANDIDATES = [
+  // Personería
+  { name: "EDGAR JOEL VERTEL TORRES", position: "personeria", grade: "General", number: 1 },
+  { name: "LUIS MATEO PEÑA MERCADO", position: "personeria", grade: "General", number: 2 },
+  { name: "CRISTIAN LOPEZ ECHEVERRY", position: "personeria", grade: "General", number: 3 },
+  // Contraloría
+  { name: "CASTRO GONZALEZ BELLYS SOFIA", position: "contraloria", grade: "General", number: 1 },
+  { name: "PADILLA MENDOZA YESID DAVID", position: "contraloria", grade: "General", number: 2 },
+  { name: "CONTRERAS CASTAÑO JUAN JOSE", position: "contraloria", grade: "General", number: 3 },
+  // Consejo 9°
+  { name: "HOYOLA MIRANDA ANTONELA", grade: "9°", position: "consejo", number: 1 },
+  { name: "MARTINEZ HERRERA LUIS ANGEL", grade: "9°", position: "consejo", number: 2 },
+  { name: "FLORES UBARNES KHANDY SOFIA", grade: "9°", position: "consejo", number: 3 },
+  { name: "REYES PASTRANA ROSA ISABEL", grade: "9°", position: "consejo", number: 4 },
+  { name: "MORALES GUZMAN LUISA FERNADA", grade: "9°", position: "consejo", number: 5 },
+  // Consejo 4°
+  { name: "COGOLLO VARGAS ELIAN DAVID", grade: "4°", position: "consejo", number: 1 },
+  { name: "COGOLLO CARPIO SAMARA MICHEL", grade: "4°", position: "consejo", number: 2 },
+  { name: "MORALES CAMAÑO KIARA", grade: "4°", position: "consejo", number: 3 },
+  { name: "CASTILLO LOPEZ JOSE DAVID", grade: "4°", position: "consejo", number: 4 },
+  { name: "GOMÉZ TERAN KEISY", grade: "4°", position: "consejo", number: 5 },
+  { name: "SUAREZ HERRERA MILAN ANDRES", grade: "4°", position: "consejo", number: 6 },
+  // Consejo 8°
+  { name: "MARTINEZ LONDOÑO CELESTE", grade: "8°", position: "consejo", number: 1 },
+  { name: "MORALES CAMAÑO DUVÁN", grade: "8°", position: "consejo", number: 2 },
+  { name: "VILLEGAS DORIA CAMILO ANDRES", grade: "8°", position: "consejo", number: 3 },
+  { name: "VILORIA JULIO LUIS DAVID", grade: "8°", position: "consejo", number: 4 },
+  { name: "DIAZ DOMINGUEZ ROSALÍA", grade: "8°", position: "consejo", number: 5 },
+  { name: "RUIZ GUZMAN ANA KARINA", grade: "8°", position: "consejo", number: 6 },
+  // Consejo 5°
+  { name: "HERRERA MARTINEZ DAYANA", grade: "5°", position: "consejo", number: 1 },
+  { name: "COGOLLO TORRES MAUREN JOSÉ", grade: "5°", position: "consejo", number: 2 },
+  { name: "MONTALVO LOPEZ MARIAN SARAY", grade: "5°", position: "consejo", number: 3 },
+  { name: "MORALES ESPITIA MARIANA", grade: "5°", position: "consejo", number: 4 },
+  { name: "JAMER DAVID MONTALVO MEZA", grade: "5°", position: "consejo", number: 5 },
+  // Consejo 7°
+  { name: "YEPES CASARUBIA AURI ESTELA", grade: "7°", position: "consejo", number: 1 },
+  { name: "MARTINEZ MIGUEL ANDRES", grade: "7°", position: "consejo", number: 2 },
+  { name: "PEÑATE MORELO MARIA ANGEL", grade: "7°", position: "consejo", number: 3 },
+  { name: "ALEJO CALZADILLA MARIANGEL", grade: "7°", position: "consejo", number: 4 },
+  { name: "RIVAS ARIETA NEIMAR ANDRES", grade: "7°", position: "consejo", number: 5 },
+  { name: "MACHADO LOZADA EFRAIN DANIEL", grade: "7°", position: "consejo", number: 6 },
+  // Consejo 3°
+  { name: "KATIUSCA URDANETAS NAVAS", grade: "3°", position: "consejo", number: 1 },
+  { name: "YURAIDIS MARIA MERCADO MORALES", grade: "3°", position: "consejo", number: 2 },
+  { name: "CASTRILLON RIVAS FREDDIER", grade: "3°", position: "consejo", number: 3 },
+  // Consejo 6°
+  { name: "FUENTES VILLEGAS WENDERLYS", grade: "6°", position: "consejo", number: 1 },
+  { name: "LAZARO CRISTINA ISABEL", grade: "6°", position: "consejo", number: 2 },
+  { name: "GALARCIO MORELO JULIANA MAIREL", grade: "6°", position: "consejo", number: 3 },
+  { name: "MENDOZA SANCHEZ ANDERSON DAVID", grade: "6°", position: "consejo", number: 4 },
+  { name: "FERNANDEZ DORIA SHAROL JULIANA", grade: "6°", position: "consejo", number: 5 },
+  { name: "ARAUJO REYES DELIANNIS NICOL", grade: "6°", position: "consejo", number: 6 },
+  // Consejo 10°
+  { name: "LOPEZ MULASCO MELISSA ANDREA", grade: "10°", position: "consejo", number: 1 },
+  { name: "PAEZ MARTINEZ JUAN PABLO", grade: "10°", position: "consejo", number: 2 },
+  { name: "PERERIRA GUEVARA ANDREA PAOLA", grade: "10°", position: "consejo", number: 3 },
+  // Consejo 11°
+  { name: "RESTREPO LEDESMA GUSTAVO", grade: "11°", position: "consejo", number: 1 },
+  { name: "SEPULVEDA ALVAREZ SILVANA", grade: "11°", position: "consejo", number: 2 },
+  { name: "LLORENTE PETRO DANA", grade: "11°", position: "consejo", number: 3 }
+];
 
 // --- Types ---
 interface AdminEmail {
@@ -252,12 +333,12 @@ const PWAStatus = () => {
 
 // --- Components ---
 
-const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
+const AdminDashboard = ({ onLogout, handleBulkLoad, handleClearAll, isBulkLoading }: { onLogout: () => void, handleBulkLoad: () => void, handleClearAll: () => void, isBulkLoading: boolean }) => {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [votes, setVotes] = useState<VoteRecord[]>([]);
   const [mesas, setMesas] = useState<Mesa[]>([]);
   const [config, setConfig] = useState<Config>({ census: 500, adminPin: MASTER_PIN, sessionStatus: 'waiting' });
-  const [activeTab, setActiveTab] = useState<'candidates' | 'results' | 'mesas' | 'settings' | 'jornada'>('results');
+  const [activeTab, setActiveTab] = useState<'candidates' | 'results' | 'mesas' | 'settings' | 'jornada'>('settings');
   const [isAddingCandidate, setIsAddingCandidate] = useState(false);
   const [newCandidate, setNewCandidate] = useState<Partial<Candidate>>({ position: 'personeria' });
   const [isAddingMesa, setIsAddingMesa] = useState(false);
@@ -267,17 +348,42 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
   const [adminEmails, setAdminEmails] = useState<AdminEmail[]>([]);
   const [newAdminEmail, setNewAdminEmail] = useState('');
 
+  // Listeners optimized by tab
   useEffect(() => {
-    const unsubCandidates = onSnapshot(collection(db, 'candidates'), (snapshot) => {
-      setCandidates(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Candidate)));
-    }, (err) => handleFirestoreError(err, OperationType.GET, 'candidates'));
-    
-    // We remove the real-time votes listener to save quota. 
-    // Results are now aggregated in candidates and config.
-    
-    const unsubMesas = onSnapshot(collection(db, 'mesas'), (snapshot) => {
-      setMesas(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mesa)));
-    }, (err) => handleFirestoreError(err, OperationType.GET, 'mesas'));
+    let unsubCandidates: (() => void) | undefined;
+    if (activeTab === 'candidates' || activeTab === 'results') {
+      unsubCandidates = onSnapshot(collection(db, 'candidates'), (snapshot) => {
+        setCandidates(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Candidate)));
+      }, (err) => {
+        const info = handleFirestoreError(err, OperationType.GET, 'candidates', false);
+        if (info.isQuota) {
+          getDocsFromCache(collection(db, 'candidates')).then(snap => {
+            setCandidates(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Candidate)));
+          }).catch(() => {});
+        }
+      });
+    }
+    return () => unsubCandidates?.();
+  }, [activeTab]);
+
+  useEffect(() => {
+    let unsubMesas: (() => void) | undefined;
+    if (activeTab === 'mesas' || activeTab === 'results' || activeTab === 'jornada') {
+      unsubMesas = onSnapshot(collection(db, 'mesas'), (snapshot) => {
+        setMesas(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mesa)));
+      }, (err) => {
+        const info = handleFirestoreError(err, OperationType.GET, 'mesas', false);
+        if (info.isQuota) {
+          getDocsFromCache(collection(db, 'mesas')).then(snap => {
+            setMesas(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mesa)));
+          }).catch(() => {});
+        }
+      });
+    }
+    return () => unsubMesas?.();
+  }, [activeTab]);
+
+  useEffect(() => {
     const unsubConfig = onSnapshot(doc(db, 'config', 'general'), (snap) => {
       if (snap.exists()) {
         const data = snap.data() as Config;
@@ -286,18 +392,34 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
           sessionStatus: data.sessionStatus || 'waiting'
         });
       }
+    }, (err) => {
+      console.warn("Config listener error:", err);
+      getDocFromCache(doc(db, 'config', 'general')).then(snap => {
+        if (snap.exists()) {
+          const data = snap.data() as Config;
+          setConfig({ ...data, sessionStatus: data.sessionStatus || 'waiting' });
+        }
+      }).catch(() => {});
     });
-    const unsubAdminEmails = onSnapshot(collection(db, 'admin_emails'), (snapshot) => {
-      setAdminEmails(snapshot.docs.map(doc => ({ email: doc.id, ...doc.data() } as AdminEmail)));
-    }, (err) => handleFirestoreError(err, OperationType.GET, 'admin_emails'));
-
-    return () => {
-      unsubCandidates();
-      unsubMesas();
-      unsubConfig();
-      unsubAdminEmails();
-    };
+    return unsubConfig;
   }, []);
+
+  useEffect(() => {
+    let unsubAdminEmails: (() => void) | undefined;
+    if (activeTab === 'settings') {
+      unsubAdminEmails = onSnapshot(collection(db, 'admin_emails'), (snapshot) => {
+        setAdminEmails(snapshot.docs.map(doc => ({ email: doc.id, ...doc.data() } as AdminEmail)));
+      }, (err) => {
+        const info = handleFirestoreError(err, OperationType.GET, 'admin_emails', false);
+        if (info.isQuota) {
+          getDocsFromCache(collection(db, 'admin_emails')).then(snap => {
+            setAdminEmails(snap.docs.map(doc => ({ email: doc.id, ...doc.data() } as AdminEmail)));
+          }).catch(() => {});
+        }
+      });
+    }
+    return () => unsubAdminEmails?.();
+  }, [activeTab]);
 
   // Fetch votes only if needed (e.g., for detailed filtering)
   const fetchVotes = async () => {
@@ -315,7 +437,6 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
 
   const [isResetting, setIsResetting] = useState(false);
   const [isVotesLoading, setIsVotesLoading] = useState(false);
-  const [isSeedingCandidates, setIsSeedingCandidates] = useState(false);
   const [mesaToDelete, setMesaToDelete] = useState<string | null>(null);
   const [candidateToDelete, setCandidateToDelete] = useState<string | null>(null);
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
@@ -403,7 +524,7 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
   };
 
   const handleToggleAdminEmail = async (email: string, currentStatus: boolean) => {
-    if (email === 'enamoradooluis@gmail.com') {
+    if (email === 'archivosmipc14@gmail.com') {
       toast.error('No se puede deshabilitar al administrador principal.');
       return;
     }
@@ -418,7 +539,7 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
   };
 
   const handleRemoveAdminEmail = async (email: string) => {
-    if (email === 'enamoradooluis@gmail.com') {
+    if (email === 'archivosmipc14@gmail.com') {
       toast.error('No se puede eliminar al administrador principal.');
       return;
     }
@@ -435,94 +556,55 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
     try {
       // Delete all votes
       const voteSnaps = await getDocs(collection(db, 'votes'));
-      const deletePromises = voteSnaps.docs.map(d => deleteDoc(d.ref));
-      await Promise.all(deletePromises);
+      
+      // We need to use multiple batches if there are more than 500 operations, 
+      // but for a typical school election reset, one or a few batches is fine.
+      // To be safe, we'll use a simple loop with batches of 500.
+      let batch = writeBatch(db);
+      let operationCount = 0;
+
+      const commitBatch = async () => {
+        if (operationCount > 0) {
+          await batch.commit();
+          batch = writeBatch(db);
+          operationCount = 0;
+        }
+      };
+
+      for (const d of voteSnaps.docs) {
+        batch.delete(d.ref);
+        operationCount++;
+        if (operationCount >= 450) await commitBatch();
+      }
 
       // Reset mesa counters
-      const mesaPromises = mesas.map(m => updateDoc(doc(db, 'mesas', m.id), { voterCount: 0 }));
-      await Promise.all(mesaPromises);
+      for (const m of mesas) {
+        batch.update(doc(db, 'mesas', m.id), { voterCount: 0 });
+        operationCount++;
+        if (operationCount >= 450) await commitBatch();
+      }
+
+      // Reset candidate counters
+      for (const c of candidates) {
+        batch.update(doc(db, 'candidates', c.id), { voteCount: 0 });
+        operationCount++;
+        if (operationCount >= 450) await commitBatch();
+      }
+
+      // Reset blanco votes in config
+      batch.update(doc(db, 'config', 'general'), {
+        'blancoVotes.personeria': 0,
+        'blancoVotes.contraloria': 0,
+        'blancoVotes.consejo': 0
+      });
+      operationCount++;
+
+      await commitBatch();
 
       toast.success('Elección reiniciada correctamente. Todo está en cero.');
       setIsResetting(false);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, 'votes');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleSeedCandidates = async () => {
-    setIsSaving(true);
-    try {
-      const candidatesToSeed = [
-        // Personeria
-        { name: 'LUIS MATEO PEÑA MERCADO', position: 'personeria', number: 1 },
-        { name: 'CRISTIAN LOPEZ ECHEVERRY', position: 'personeria', number: 2 },
-        { name: 'EDGAR JOEL VERTEL TORRES', position: 'personeria', number: 3 },
-        // Contraloria
-        { name: 'PADILLA MENDOZA YESID DAVID', position: 'contraloria', number: 1 },
-        { name: 'CONTRERAS CASTAÑO JUAN JOSE', position: 'contraloria', number: 2 },
-        { name: 'CASTRO GONZALEZ BELLYS SOFIA', position: 'contraloria', number: 3 },
-        // Consejo 3
-        { name: 'KATIUSCA URDANETAS NAVAS', position: 'consejo', number: 1, grade: '3°' },
-        { name: 'YURAIDIS MARIA MERCADO MORALES', position: 'consejo', number: 2, grade: '3°' },
-        { name: 'CASTRILLON RIVAS FREDDIER', position: 'consejo', number: 3, grade: '3°' },
-        // Consejo 4
-        { name: 'SUAREZ HERRERA MILAN ANDRES', position: 'consejo', number: 1, grade: '4°' },
-        { name: 'COGOLLO VARGAS ELIAN DAVID', position: 'consejo', number: 2, grade: '4°' },
-        { name: 'GOMÉZ TERAN KEISY', position: 'consejo', number: 3, grade: '4°' },
-        { name: 'MORALES CAMAÑO KIARA', position: 'consejo', number: 4, grade: '4°' },
-        { name: 'COGOLLO CARPIO SAMARA MICHEL', position: 'consejo', number: 5, grade: '4°' },
-        { name: 'CASTILLO LOPEZ JOSE DAVID', position: 'consejo', number: 6, grade: '4°' },
-        // Consejo 5
-        { name: 'HERRERA MARTINEZ DAYANA', position: 'consejo', number: 1, grade: '5°' },
-        { name: 'MORALES ESPITIA MARIANA', position: 'consejo', number: 2, grade: '5°' },
-        { name: 'COGOLLO TORRES MAUREN JOSÉ', position: 'consejo', number: 3, grade: '5°' },
-        { name: 'MONTALVO LOPEZ MARIAN SARAY', position: 'consejo', number: 4, grade: '5°' },
-        { name: 'JAMER DAVID MONTALVO MEZA', position: 'consejo', number: 5, grade: '5°' },
-        // Consejo 6
-        { name: 'FERNANDEZ DORIA SHAROL JULIANA', position: 'consejo', number: 1, grade: '6°' },
-        { name: 'FUENTES VILLEGAS WENDERLYS', position: 'consejo', number: 2, grade: '6°' },
-        { name: 'MENDOZA SANCHEZ ANDERSON DAVID', position: 'consejo', number: 3, grade: '6°' },
-        { name: 'GALARCIO MORELO JULIANA MAIREL', position: 'consejo', number: 4, grade: '6°' },
-        { name: 'LAZARO CRISTINA ISABEL', position: 'consejo', number: 5, grade: '6°' },
-        { name: 'ARAUJO REYES DELIANNIS NICOL', position: 'consejo', number: 6, grade: '6°' },
-        // Consejo 7
-        { name: 'PEÑATE MORELO MARIA ANGEL', position: 'consejo', number: 1, grade: '7°' },
-        { name: 'YEPES CASARUBIA AURI ESTELA', position: 'consejo', number: 2, grade: '7°' },
-        { name: 'MACHADO LOZADA EFRAIN DANIEL', position: 'consejo', number: 3, grade: '7°' },
-        { name: 'MARTINEZ MIGUEL ANDRES', position: 'consejo', number: 4, grade: '7°' },
-        { name: 'ALEJO CALZADILLA MARIANGEL', position: 'consejo', number: 5, grade: '7°' },
-        { name: 'RIVAS ARIETA NEIMAR ANDRES', position: 'consejo', number: 6, grade: '7°' },
-        // Consejo 8
-        { name: 'VILORIA JULIO LUIS DAVID', position: 'consejo', number: 1, grade: '8°' },
-        { name: 'MARTINEZ LONDOÑO CELESTE', position: 'consejo', number: 2, grade: '8°' },
-        { name: 'MORALES CAMAÑO DUVÁN', position: 'consejo', number: 3, grade: '8°' },
-        { name: 'DIAZ DOMINGUEZ ROSALÍA', position: 'consejo', number: 4, grade: '8°' },
-        { name: 'VILLEGAS DORIA CAMILO ANDRES', position: 'consejo', number: 5, grade: '8°' },
-        { name: 'RUIZ GUZMAN ANA KARINA', position: 'consejo', number: 6, grade: '8°' },
-        // Consejo 9
-        { name: 'FLORES UBARNES KHANDY SOFIA', position: 'consejo', number: 1, grade: '9°' },
-        { name: 'MORALES GUZMAN LUISA FERNADA', position: 'consejo', number: 2, grade: '9°' },
-        { name: 'MARTINEZ HERRERA LUIS ANGEL', position: 'consejo', number: 3, grade: '9°' },
-        { name: 'HOYOLA MIRANDA ANTONELA', position: 'consejo', number: 4, grade: '9°' },
-        { name: 'REYES PASTRANA ROSA ISABEL', position: 'consejo', number: 5, grade: '9°' },
-        // Consejo 10
-        { name: 'PAEZ MARTINEZ JUAN PABLO', position: 'consejo', number: 1, grade: '10°' },
-        { name: 'PERERIRA GUEVARA ANDREA PAOLA', position: 'consejo', number: 2, grade: '10°' },
-        { name: 'LOPEZ MULASCO MELISSA ANDREA', position: 'consejo', number: 3, grade: '10°' },
-        // Consejo 11
-        { name: 'RESTREPO LEDESMA GUSTAVO', position: 'consejo', number: 1, grade: '11°' },
-        { name: 'LLORENTE PETRO DANA', position: 'consejo', number: 2, grade: '11°' },
-        { name: 'SEPULVEDA ALVAREZ SILVANA', position: 'consejo', number: 3, grade: '11°' },
-      ];
-
-      for (const cand of candidatesToSeed) {
-        await addDoc(collection(db, 'candidates'), cand);
-      }
-      toast.success('Todos los candidatos han sido cargados correctamente.');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'candidates');
     } finally {
       setIsSaving(false);
     }
@@ -547,9 +629,21 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
     doc.setFontSize(10);
     doc.setTextColor(100, 116, 139);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Fecha de reporte: ${new Date().toLocaleString()}`, pageWidth / 2, 38, { align: 'center' });
+    doc.text(`Ciudad: Montería | Fecha de reporte: ${new Date().toLocaleString()}`, pageWidth / 2, 38, { align: 'center' });
 
     let currentY = 50;
+
+    // Ensure we have the latest votes for the report
+    toast.loading('Obteniendo datos actualizados para el reporte...');
+    let latestVotes: VoteRecord[] = votes;
+    try {
+      const votesSnap = await getDocs(collection(db, 'votes'));
+      latestVotes = votesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as VoteRecord));
+    } catch (err) {
+      console.error("Error fetching votes for PDF:", err);
+      toast.error("No se pudieron obtener los votos detallados. El reporte podría estar incompleto.");
+    }
+    toast.dismiss();
 
     const checkPageBreak = (neededHeight: number) => {
       if (currentY + neededHeight > 275) {
@@ -582,7 +676,7 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
       doc.text(`Mesa: ${mesa.name} (Grado: ${mesa.grade})`, 14, currentY);
       currentY += 8;
 
-      const mesaVotes = votes.filter(v => v.mesaId === mesa.id);
+      const mesaVotes = latestVotes.filter(v => v.mesaId === mesa.id);
 
       // Tables for each position
       const positions: ('consejo' | 'contraloria' | 'personeria')[] = ['consejo', 'contraloria', 'personeria'];
@@ -638,7 +732,7 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
       const gradeTableData = [];
       for (const grade of GRADES) {
         const gradeCandidates = candidates.filter(c => c.position === 'consejo' && c.grade === grade);
-        const gradeVotes = votes.filter(v => v.position === 'consejo' && v.grade === grade);
+        const gradeVotes = latestVotes.filter(v => v.position === 'consejo' && v.grade === grade);
         const results = gradeCandidates.map(c => ({
           name: c.name,
           votes: gradeVotes.filter(v => v.candidateId === c.id).length
@@ -672,11 +766,11 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
       const posCandidates = candidates.filter(c => c.position === pos);
       const results = posCandidates.map(c => ({
         name: c.name,
-        votes: votes.filter(v => v.candidateId === c.id).length
+        votes: latestVotes.filter(v => v.candidateId === c.id).length
       }));
       results.push({ 
         name: 'Voto en Blanco', 
-        votes: votes.filter(v => v.position === pos && v.candidateId === 'blanco').length 
+        votes: latestVotes.filter(v => v.position === pos && v.candidateId === 'blanco').length 
       });
       results.sort((a, b) => b.votes - a.votes);
 
@@ -747,15 +841,29 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(51, 65, 85);
     
+    const startTime = config.sessionStart ? new Date(config.sessionStart.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'N/A';
+    const endTime = config.sessionEnd ? new Date(config.sessionEnd.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'N/A';
+    const totalVoters = Math.round(latestVotes.length / 3);
+
     const formalReportText = [
-      `En la ciudad de Sincelejo, a los ${new Date().getDate()} días del mes de marzo de ${new Date().getFullYear()}, `,
+      `En la ciudad de Montería, a los ${new Date().getDate()} días del mes de marzo de ${new Date().getFullYear()}, `,
       `se emite el presente reporte consolidado para la jornada electoral de la Institución Educativa Villa Margarita.`,
       '',
-      `Se registró una participación total de ${Math.round(stats.totalVotes / 3)} estudiantes, `,
+      `DATOS DE TRANSPARENCIA Y AUDITORÍA:`,
+      `----------------------------------------------------------------------------------------------------`,
+      `- HORA DE APERTURA: ${startTime}`,
+      `  Estado Inicial: ${config.initialSnapshot?.voterCount || 0} votantes registrados | ${config.initialSnapshot?.totalVotes || 0} sufragios totales.`,
+      '',
+      `- HORA DE CIERRE: ${endTime}`,
+      `  Estado Final: ${config.finalSnapshot?.voterCount || totalVoters} votantes registrados | ${config.finalSnapshot?.totalVotes || latestVotes.length} sufragios totales.`,
+      `----------------------------------------------------------------------------------------------------`,
+      '',
+      `Se registró una participación total de ${totalVoters} estudiantes, `,
       `quienes ejercieron su derecho al voto en las ${stats.totalMesas} mesas habilitadas.`,
+      `La totalidad de votos procesados por el sistema fue de ${latestVotes.length} sufragios.`,
       '',
       `El censo electoral reportado fue de ${config.census} estudiantes, lo que representa `,
-      `un índice de participación del ${config.census > 0 ? Math.round((Math.round(stats.totalVotes / 3) / config.census) * 100) : 0}%.`,
+      `un índice de participación del ${config.census > 0 ? Math.round((totalVoters / config.census) * 100) : 0}%.`,
       '',
       'Los resultados presentados en este documento han sido procesados y validados por el sistema ',
       'de votación electrónica institucional, garantizando la transparencia y veracidad de cada sufragio.',
@@ -995,27 +1103,28 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-      <header className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+      <div className="max-w-7xl mx-auto">
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div className="flex items-center gap-3">
-          <div className="bg-indigo-600 p-2 rounded-lg text-white">
+          <div className="bg-indigo-600 p-2 rounded-lg text-white flex-shrink-0">
             <ShieldCheck size={32} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 line-clamp-1">{config.institutionName || 'Villa Margarita'}</h1>
-            <p className="text-slate-500">Panel de Administración Electoral {config.electionYear}</p>
+            <h1 className="text-xl md:text-2xl font-bold text-slate-900 line-clamp-1">{config.institutionName || 'Villa Margarita'}</h1>
+            <p className="text-slate-500 text-sm">Panel de Administración Electoral {config.electionYear}</p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
           <button 
             onClick={() => window.location.hash = ''}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap text-sm"
           >
             <HomeIcon size={18} />
             Inicio
           </button>
           <button 
             onClick={onLogout}
-            className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-100 rounded-lg text-red-700 hover:bg-red-100 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-100 rounded-lg text-red-700 hover:bg-red-100 transition-colors whitespace-nowrap text-sm"
           >
             <LogOut size={18} />
             Salir
@@ -1023,34 +1132,34 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
         </div>
       </header>
 
-      <nav className="flex gap-2 mb-8 bg-white p-1 rounded-xl border border-slate-200 w-fit">
+      <nav className="flex overflow-x-auto gap-1 mb-8 bg-white p-1 rounded-xl border border-slate-200 w-full no-scrollbar">
         <button 
           onClick={() => setActiveTab('results')}
-          className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'results' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+          className={`px-4 md:px-6 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${activeTab === 'results' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
         >
           Resultados
         </button>
         <button 
           onClick={() => setActiveTab('jornada')}
-          className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'jornada' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+          className={`px-4 md:px-6 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${activeTab === 'jornada' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
         >
           Jornada
         </button>
         <button 
           onClick={() => setActiveTab('candidates')}
-          className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'candidates' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+          className={`px-4 md:px-6 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${activeTab === 'candidates' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
         >
           Candidatos
         </button>
         <button 
           onClick={() => setActiveTab('mesas')}
-          className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'mesas' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+          className={`px-4 md:px-6 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${activeTab === 'mesas' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
         >
           Mesas
         </button>
         <button 
           onClick={() => setActiveTab('settings')}
-          className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
+          className={`px-4 md:px-6 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${activeTab === 'settings' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}
         >
           Ajustes
         </button>
@@ -1239,17 +1348,17 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
 
         {activeTab === 'jornada' && (
           <div className="max-w-4xl space-y-8">
-            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-              <div className="flex items-center gap-4 mb-8">
-                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${
+            <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-200 shadow-sm">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-8">
+                <div className={`w-12 h-12 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center shrink-0 ${
                   config.sessionStatus === 'active' ? 'bg-green-100 text-green-600' : 
                   config.sessionStatus === 'ended' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'
                 }`}>
-                  <Zap size={32} />
+                  <Zap className="w-6 h-6 sm:w-8 sm:h-8" />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-black text-slate-900">Control de Jornada Electoral</h2>
-                  <p className="text-slate-500">Administra el inicio y fin de las votaciones</p>
+                  <h2 className="text-xl sm:text-2xl font-black text-slate-900">Control de Jornada Electoral</h2>
+                  <p className="text-sm sm:text-base text-slate-500">Administra el inicio y fin de las votaciones</p>
                 </div>
               </div>
 
@@ -1319,7 +1428,7 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
               </div>
             </div>
 
-            <div className="bg-indigo-50 p-8 rounded-3xl border border-indigo-100">
+            <div className="bg-indigo-50 p-6 md:p-8 rounded-3xl border border-indigo-100">
               <h3 className="text-lg font-bold text-indigo-900 mb-6 flex items-center gap-2">
                 <Info size={20} />
                 Información de Auditoría
@@ -1399,7 +1508,7 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                  <div className="flex items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
                     <button 
                       onClick={() => handleEditCandidateClick(c)}
                       className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
@@ -1449,7 +1558,7 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                  <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
                     <button 
                       onClick={() => handleEditMesaClick(m)}
                       className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
@@ -1471,7 +1580,7 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
 
         {activeTab === 'settings' && (
           <div className="max-w-2xl space-y-8">
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm">
               <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
                 <Settings size={24} className="text-indigo-600" />
                 Configuración General
@@ -1549,11 +1658,11 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
                     {/* Default Admin */}
                     <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
-                      <span className="text-sm font-medium text-slate-700">enamoradooluis@gmail.com</span>
+                      <span className="text-sm font-medium text-slate-700">archivosmipc14@gmail.com</span>
                       <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider bg-indigo-100 px-2 py-1 rounded-md">Principal</span>
                     </div>
                     {/* Other Admins */}
-                    {adminEmails.filter(a => a.email !== 'enamoradooluis@gmail.com').map(admin => (
+                    {adminEmails.filter(a => a.email !== 'archivosmipc14@gmail.com').map(admin => (
                       <div key={admin.email} className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-200 shadow-sm">
                         <div className="flex flex-col">
                           <span className="text-sm text-slate-700">{admin.email}</span>
@@ -1591,11 +1700,12 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <button 
-                  onClick={() => setIsSeedingCandidates(true)}
-                  className="flex items-center justify-center gap-3 p-4 bg-indigo-50 text-indigo-700 rounded-xl hover:bg-indigo-100 transition-all font-bold"
+                  onClick={handleBulkLoad}
+                  disabled={isBulkLoading}
+                  className="flex items-center justify-center gap-3 p-4 bg-emerald-50 text-emerald-700 rounded-xl hover:bg-emerald-100 transition-all font-bold disabled:opacity-50"
                 >
-                  <Plus size={20} />
-                  Cargar Candidatos Oficiales
+                  <Database size={20} />
+                  Carga Masiva (Villa Margarita)
                 </button>
                 <button 
                   onClick={generateResultsPDF}
@@ -1612,11 +1722,12 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
                   Generar Reporte Mesas
                 </button>
                 <button 
-                  onClick={() => setIsResetting(true)}
-                  className="flex items-center justify-center gap-3 p-4 bg-red-50 text-red-700 rounded-xl hover:bg-red-100 transition-all font-bold"
+                  onClick={handleClearAll}
+                  disabled={isBulkLoading}
+                  className="flex items-center justify-center gap-3 p-4 bg-red-50 text-red-700 rounded-xl hover:bg-red-100 transition-all font-bold disabled:opacity-50"
                 >
-                  <Trash2 size={20} />
-                  Reiniciar Elección (Borrar Todo)
+                  <RotateCcw size={20} />
+                  Reiniciar Votos (Nueva Elección)
                 </button>
               </div>
             </div>
@@ -1876,44 +1987,6 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
         )}
       </AnimatePresence>
 
-      {/* Seed Candidates Confirmation Modal */}
-      <AnimatePresence>
-        {isSeedingCandidates && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-2xl p-8 w-full max-w-sm shadow-2xl text-center"
-            >
-              <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Plus size={32} />
-              </div>
-              <h3 className="text-xl font-bold text-slate-900 mb-2">¿Cargar Candidatos?</h3>
-              <p className="text-slate-500 mb-6">¿Cargar la lista oficial de candidatos 2026? Esto agregará a todos los candidatos predefinidos.</p>
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setIsSeedingCandidates(false)}
-                  className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  onClick={async () => {
-                    await handleSeedCandidates();
-                    setIsSeedingCandidates(false);
-                  }}
-                  disabled={isSaving}
-                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50"
-                >
-                  {isSaving ? 'Cargando...' : 'Cargar Lista'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       {/* Delete Mesa Confirmation Modal */}
       <AnimatePresence>
         {mesaToDelete && (
@@ -1947,15 +2020,17 @@ const AdminDashboard = ({ onLogout }: { onLogout: () => void }) => {
           </div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 };
 
-const StudentVoting = ({ config }: { config: Config }) => {
+const StudentVoting = ({ config: initialConfig }: { config: Config }) => {
   const [step, setStep] = useState<'setup' | 'start' | 'consejo' | 'contraloria' | 'personeria' | 'success'>('setup');
   const [selectedMesa, setSelectedMesa] = useState<Mesa | null>(null);
   const [mesas, setMesas] = useState<Mesa[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [config, setConfig] = useState<Config>(initialConfig);
   const [selections, setSelections] = useState<{ [key: string]: string }>({});
   const [error, setError] = useState('');
   const [cooldown, setCooldown] = useState(0);
@@ -1966,15 +2041,47 @@ const StudentVoting = ({ config }: { config: Config }) => {
 
   useEffect(() => {
     const loadInitialData = async () => {
+      // Try loading from localStorage first for instant UI
+      const cachedCandidates = localStorage.getItem('villa_margarita_candidates');
+      const cachedMesas = localStorage.getItem('villa_margarita_mesas');
+      const cachedConfig = localStorage.getItem('villa_margarita_config');
+      
+      if (cachedCandidates) setCandidates(JSON.parse(cachedCandidates));
+      if (cachedMesas) setMesas(JSON.parse(cachedMesas));
+      if (cachedConfig) setConfig(JSON.parse(cachedConfig));
+
       try {
+        // Single read from server instead of real-time listener for voting view
         const candidatesSnap = await getDocs(collection(db, 'candidates'));
-        setCandidates(candidatesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Candidate)));
+        const cData = candidatesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Candidate));
+        setCandidates(cData);
+        localStorage.setItem('villa_margarita_candidates', JSON.stringify(cData));
         
         const mesasSnap = await getDocs(collection(db, 'mesas'));
-        setMesas(mesasSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mesa)));
+        const mData = mesasSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mesa));
+        setMesas(mData);
+        localStorage.setItem('villa_margarita_mesas', JSON.stringify(mData));
+
+        const configSnap = await getDoc(doc(db, 'config', 'general'));
+        if (configSnap.exists()) {
+          const conf = { ...configSnap.data() } as Config;
+          setConfig(conf);
+          localStorage.setItem('villa_margarita_config', JSON.stringify(conf));
+        }
       } catch (err) {
-        // If it's a quota error, handleFirestoreError will catch it and show the toast/error boundary
-        handleFirestoreError(err, OperationType.GET, 'initial_data');
+        const info = handleFirestoreError(err, OperationType.GET, 'initial_data', false);
+        if (info.isQuota) {
+          try {
+            const cSnap = await getDocsFromCache(collection(db, 'candidates'));
+            setCandidates(cSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Candidate)));
+            const mSnap = await getDocsFromCache(collection(db, 'mesas'));
+            setMesas(mSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mesa)));
+          } catch (cacheErr) {
+            throw new Error(JSON.stringify(info));
+          }
+        } else {
+          throw new Error(JSON.stringify(info));
+        }
       }
     };
 
@@ -1993,10 +2100,20 @@ const StudentVoting = ({ config }: { config: Config }) => {
             setStep('setup');
           }
         })
-        .catch(err => {
+        .catch(async err => {
           console.error("Error loading saved mesa:", err);
-          // If offline, we might still have it in cache, but if it fails completely, go to setup
-          setStep('setup');
+          // Try cache fallback
+          try {
+            const snap = await getDocFromCache(doc(db, 'mesas', savedMesaId));
+            if (snap.exists()) {
+              setSelectedMesa({ id: snap.id, ...snap.data() } as Mesa);
+              setStep('start');
+            } else {
+              setStep('setup');
+            }
+          } catch (e) {
+            setStep('setup');
+          }
         });
     } else {
       setStep('setup');
@@ -2081,36 +2198,40 @@ const StudentVoting = ({ config }: { config: Config }) => {
   const submitVotes = async (finalSelections: { [key: string]: string }) => {
     if (!selectedMesa) return;
     try {
-      const votePromises = Object.entries(finalSelections).map(async ([pos, candId]) => {
+      const batch = writeBatch(db);
+      const voterId = 'anonymous_' + Date.now();
+
+      Object.entries(finalSelections).forEach(([pos, candId]) => {
         // 1. Record the individual vote (for auditing)
-        await addDoc(collection(db, 'votes'), {
+        const voteRef = doc(collection(db, 'votes'));
+        batch.set(voteRef, {
           candidateId: candId,
           position: pos,
           grade: selectedMesa.grade,
           mesaId: selectedMesa.id,
           mesaName: selectedMesa.name,
           timestamp: serverTimestamp(),
-          voterId: 'anonymous_' + Date.now()
+          voterId: voterId
         });
 
         // 2. Increment aggregated counts
         if (candId === 'blanco') {
-          await updateDoc(doc(db, 'config', 'general'), {
+          batch.update(doc(db, 'config', 'general'), {
             [`blancoVotes.${pos}`]: increment(1)
           });
         } else {
-          await updateDoc(doc(db, 'candidates', candId), {
+          batch.update(doc(db, 'candidates', candId), {
             voteCount: increment(1)
           });
         }
       });
       
-      await Promise.all(votePromises);
-      
       // Increment voter count for the mesa
-      await updateDoc(doc(db, 'mesas', selectedMesa.id), {
+      batch.update(doc(db, 'mesas', selectedMesa.id), {
         voterCount: increment(1)
       });
+
+      await batch.commit();
 
       setStep('success');
       toast.success('¡Votos registrados correctamente!');
@@ -2169,33 +2290,33 @@ const StudentVoting = ({ config }: { config: Config }) => {
 
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
-        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-4xl text-center">
-          <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Settings size={32} />
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white p-6 md:p-8 rounded-3xl shadow-2xl w-full max-w-4xl text-center flex flex-col max-h-[90vh]">
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6 shrink-0">
+            <Settings className="w-6 h-6 md:w-8 md:h-8" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 mb-2">Configuración de Mesa</h1>
-          <p className="text-slate-500 mb-8">Selecciona la mesa asignada a este dispositivo</p>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-900 mb-1 md:mb-2 shrink-0">Configuración de Mesa</h1>
+          <p className="text-slate-500 mb-6 md:mb-8 text-sm md:text-base shrink-0">Selecciona la mesa asignada a este dispositivo</p>
           
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row gap-4 max-w-xs mx-auto">
+          <div className="space-y-4 md:space-y-6 flex-1 overflow-hidden flex flex-col">
+            <div className="flex flex-col sm:flex-row gap-3 md:gap-4 max-w-xs mx-auto shrink-0 w-full">
               <input 
                 type="password" 
                 placeholder="PIN de Seguridad"
-                className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-center font-bold"
+                className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-center font-bold w-full"
                 value={setupPin}
                 onChange={e => setSetupPin(e.target.value)}
               />
               <button 
                 onClick={() => window.location.hash = ''}
-                className="px-4 py-3 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
+                className="px-4 py-3 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-colors flex items-center justify-center gap-2 w-full sm:w-auto"
               >
                 <HomeIcon size={18} />
-                <span className="sm:hidden">Volver</span>
+                <span className="sm:hidden">Volver al Inicio</span>
               </button>
             </div>
-            {error && <p className="text-red-500 text-sm font-medium mt-2">{error}</p>}
+            {error && <p className="text-red-500 text-sm font-medium mt-2 shrink-0">{error}</p>}
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 overflow-y-auto pr-2 custom-scrollbar flex-1 min-h-[200px] pb-4">
               {sortedMesas.map(m => (
                 <button 
                   key={m.id}
@@ -2221,19 +2342,19 @@ const StudentVoting = ({ config }: { config: Config }) => {
       <div className="min-h-screen flex items-center justify-center bg-indigo-600 p-4 relative">
         <button 
           onClick={() => setIsResettingMesa(true)}
-          className="absolute top-8 left-8 text-white/20 hover:text-white/50 transition-colors"
+          className="absolute top-4 left-4 md:top-8 md:left-8 text-white/20 hover:text-white/50 transition-colors"
           title="Resetear Mesa"
         >
-          <School size={32} />
+          <School className="w-8 h-8 md:w-10 md:h-10" />
         </button>
         
-        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white p-12 rounded-3xl shadow-2xl w-full max-w-xl text-center">
-          <div className="w-24 h-24 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-8">
-            <Vote size={48} />
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white p-8 md:p-12 rounded-3xl shadow-2xl w-full max-w-xl text-center">
+          <div className="w-16 h-16 md:w-24 md:h-24 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6 md:mb-8">
+            <Vote className="w-8 h-8 md:w-12 md:h-12" />
           </div>
-          <h1 className="text-4xl font-black text-slate-900 mb-4">Villa Margarita</h1>
-          <div className="bg-indigo-50 px-6 py-3 rounded-2xl inline-block mb-12">
-            <p className="text-indigo-700 font-bold text-lg">
+          <h1 className="text-3xl md:text-4xl font-black text-slate-900 mb-3 md:mb-4">Villa Margarita</h1>
+          <div className="bg-indigo-50 px-4 py-2 md:px-6 md:py-3 rounded-2xl inline-block mb-8 md:mb-12">
+            <p className="text-indigo-700 font-bold text-base md:text-lg">
               {selectedMesa?.name} • Grado {selectedMesa?.grade}
             </p>
           </div>
@@ -2241,31 +2362,31 @@ const StudentVoting = ({ config }: { config: Config }) => {
           <div className="flex flex-col gap-3">
             <button 
               onClick={() => setStep('consejo')}
-              className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-2xl hover:bg-indigo-700 transition-all shadow-xl flex items-center justify-center gap-4"
+              className="w-full py-4 md:py-6 bg-indigo-600 text-white rounded-2xl font-black text-xl md:text-2xl hover:bg-indigo-700 transition-all shadow-xl flex items-center justify-center gap-3 md:gap-4"
             >
               Comenzar a Votar
-              <ChevronRight size={32} />
+              <ChevronRight className="w-6 h-6 md:w-8 md:h-8" />
             </button>
             
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
               <button 
                 onClick={() => setStep('setup')}
-                className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                className="flex-1 py-3 md:py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2 text-sm md:text-base"
               >
-                <ArrowLeft size={20} />
+                <ArrowLeft size={18} />
                 Cambiar Mesa
               </button>
               <button 
                 onClick={() => window.location.hash = ''}
-                className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                className="flex-1 py-3 md:py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all flex items-center justify-center gap-2 text-sm md:text-base"
               >
-                <HomeIcon size={20} />
+                <HomeIcon size={18} />
                 Inicio
               </button>
             </div>
           </div>
           
-          <p className="mt-4 text-slate-400 text-sm">Moderador presente en mesa para asistencia</p>
+          <p className="mt-4 md:mt-6 text-slate-400 text-xs md:text-sm">Moderador presente en mesa para asistencia</p>
         </motion.div>
       </div>
     );
@@ -2274,21 +2395,21 @@ const StudentVoting = ({ config }: { config: Config }) => {
   if (step === 'success') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-green-500 p-4">
-        <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white p-12 rounded-3xl shadow-2xl text-center max-w-md">
-          <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
-            <CheckCircle2 size={56} />
+        <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white p-8 md:p-12 rounded-3xl shadow-2xl text-center max-w-md w-full">
+          <div className="w-16 h-16 md:w-24 md:h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6">
+            <CheckCircle2 className="w-8 h-8 md:w-14 md:h-14" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-4">¡Voto Registrado!</h1>
-          <p className="text-slate-600 mb-8 text-lg">Gracias por participar. Por favor, retírate de la mesa.</p>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900 mb-2 md:mb-4">¡Voto Registrado!</h1>
+          <p className="text-slate-600 mb-6 md:mb-8 text-base md:text-lg">Gracias por participar. Por favor, retírate de la mesa.</p>
           
-          <div className="relative w-20 h-20 mx-auto mb-4">
+          <div className="relative w-16 h-16 md:w-20 md:h-20 mx-auto mb-4">
             <svg className="w-full h-full" viewBox="0 0 100 100">
               <circle className="text-slate-100 stroke-current" strokeWidth="10" fill="transparent" r="40" cx="50" cy="50" />
               <motion.circle className="text-green-500 stroke-current" strokeWidth="10" strokeLinecap="round" fill="transparent" r="40" cx="50" cy="50" initial={{ pathLength: 1 }} animate={{ pathLength: 0 }} transition={{ duration: 10, ease: "linear" }} />
             </svg>
-            <div className="absolute inset-0 flex items-center justify-center font-black text-2xl text-slate-900">{cooldown}</div>
+            <div className="absolute inset-0 flex items-center justify-center font-black text-xl md:text-2xl text-slate-900">{cooldown}</div>
           </div>
-          <p className="text-slate-400 text-sm">Siguiente estudiante en {cooldown} segundos...</p>
+          <p className="text-slate-400 text-xs md:text-sm">Siguiente estudiante en {cooldown} segundos...</p>
         </motion.div>
       </div>
     );
@@ -2318,17 +2439,17 @@ const StudentVoting = ({ config }: { config: Config }) => {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="max-w-6xl mx-auto p-4 md:p-8">
-        <header className="mb-12 text-center">
+        <header className="mb-8 md:mb-12 text-center">
           <div className="inline-block px-4 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm font-bold uppercase tracking-widest mb-4">
             Paso {getStepNumber()} de {getTotalSteps()}
           </div>
-          <h2 className="text-4xl font-black text-slate-900 capitalize mb-2">
+          <h2 className="text-2xl md:text-4xl font-black text-slate-900 capitalize mb-2">
             Votación para {currentPosition}
           </h2>
-          <p className="text-slate-500">Selecciona a tu candidato preferido de la lista</p>
+          <p className="text-slate-500 text-sm md:text-base">Selecciona a tu candidato preferido de la lista</p>
         </header>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
           {filteredCandidates.map(c => (
             <motion.button
               key={c.id}
@@ -2343,16 +2464,16 @@ const StudentVoting = ({ config }: { config: Config }) => {
                   <img src={c.photoUrl} alt={c.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-slate-300">
-                    <UserIcon size={64} />
+                    <UserIcon className="w-12 h-12 md:w-16 md:h-16" />
                   </div>
                 )}
-                <div className="absolute top-2 right-2 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-xl shadow-md flex items-center justify-center font-black text-xl text-indigo-600">
+                <div className="absolute top-2 right-2 w-8 h-8 md:w-10 md:h-10 bg-white/90 backdrop-blur-sm rounded-xl shadow-md flex items-center justify-center font-black text-lg md:text-xl text-indigo-600">
                   {c.number}
                 </div>
               </div>
-              <div className="p-4 md:p-6 flex-1 flex flex-col justify-center">
+              <div className="p-3 md:p-6 flex-1 flex flex-col justify-center">
                 <h3 className={`text-sm md:text-lg font-bold text-slate-900 leading-tight transition-colors line-clamp-2 ${!isProcessing && 'group-hover:text-indigo-600'}`}>{c.name}</h3>
-                <p className="text-slate-500 text-xs md:text-sm mt-2">Candidato #{c.number}</p>
+                <p className="text-slate-500 text-xs md:text-sm mt-1 md:mt-2">Candidato #{c.number}</p>
               </div>
             </motion.button>
           ))}
@@ -2363,13 +2484,13 @@ const StudentVoting = ({ config }: { config: Config }) => {
             whileHover={!isProcessing ? { y: -5 } : {}}
             whileTap={!isProcessing ? { scale: 0.98 } : {}}
             onClick={() => handleVote('blanco', currentPosition)}
-            className={`bg-white rounded-2xl overflow-hidden shadow-md border-2 border-transparent transition-all text-left flex flex-col items-center justify-center p-6 md:p-8 min-h-[200px] ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:border-slate-400'}`}
+            className={`bg-white rounded-2xl overflow-hidden shadow-md border-2 border-transparent transition-all text-left flex flex-col items-center justify-center p-4 md:p-8 min-h-[150px] md:min-h-[200px] ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:border-slate-400'}`}
           >
-            <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mb-4">
-              <Plus size={32} className="rotate-45" />
+            <div className="w-10 h-10 md:w-16 md:h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mb-2 md:mb-4">
+              <Plus className="w-6 h-6 md:w-8 md:h-8 rotate-45" />
             </div>
             <h3 className="text-sm md:text-lg font-bold text-slate-900 text-center">Voto en Blanco</h3>
-            <p className="text-slate-500 text-xs md:text-sm text-center mt-2">Ninguno</p>
+            <p className="text-slate-500 text-xs md:text-sm text-center mt-1 md:mt-2">Ninguno</p>
           </motion.button>
         </div>
       </div>
@@ -2490,6 +2611,8 @@ export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [isAdminChecking, setIsAdminChecking] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isBulkLoading, setIsBulkLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'home' | 'admin' | 'voting'>('home');
   const [config, setConfig] = useState<Config>({ census: 500, adminPin: MASTER_PIN, sessionStatus: 'waiting' });
@@ -2514,40 +2637,63 @@ export default function App() {
         setIsAdminChecking(true);
         try {
           // Force check against default admin email first for immediate access
-          const isDefaultAdmin = u.email === 'enamoradooluis@gmail.com';
+          const isDefaultAdmin = u.email === 'archivosmipc14@gmail.com';
           
           // Also check database for other admins
           let hasAdminRole = false;
           if (u.email) {
-            const adminDoc = await getDoc(doc(db, 'admin_emails', u.email.toLowerCase().trim()));
-            if (adminDoc.exists()) {
-              const data = adminDoc.data();
-              // Access is allowed if enabled is true, or if it's the principal admin
-              hasAdminRole = data.enabled !== false; 
+            try {
+              const adminDoc = await getDoc(doc(db, 'admin_emails', u.email.toLowerCase().trim()));
+              if (adminDoc.exists()) {
+                const data = adminDoc.data();
+                hasAdminRole = data.enabled !== false; 
+              }
+            } catch (dbErr) {
+              // Try cache fallback for admin check
+              try {
+                const adminDoc = await getDocFromCache(doc(db, 'admin_emails', u.email.toLowerCase().trim()));
+                if (adminDoc.exists()) {
+                  const data = adminDoc.data();
+                  hasAdminRole = data.enabled !== false;
+                }
+              } catch (cacheErr) {
+                // If both fail, we'll rely on isDefaultAdmin
+              }
             }
           }
           
           setIsAdminUser(isDefaultAdmin || hasAdminRole);
-        } catch (err) {
+
+        // If user is admin and config doesn't exist, initialize it
+        if (isDefaultAdmin || hasAdminRole) {
+          try {
+            const configSnap = await getDoc(doc(db, 'config', 'general'));
+            if (!configSnap.exists()) {
+              await setDoc(doc(db, 'config', 'general'), { 
+                census: 500, 
+                sessionStatus: 'waiting',
+                institutionName: 'INSTITUCIÓN EDUCATIVA VILLA MARGARITA',
+                electionYear: '2026'
+              });
+              toast.info('Sistema inicializado por primera vez.');
+            }
+          } catch (initErr) {
+            console.error("Error during admin-led initialization:", initErr);
+          }
+        } 
+      } catch (err) {
           console.error("Error checking admin status:", err);
-          // Fallback to email check if Firestore fails
-          setIsAdminUser(u.email === 'enamoradooluis@gmail.com');
+          setIsAdminUser(u.email === 'archivosmipc14@gmail.com');
         } finally {
           setIsAdminChecking(false);
+          setLoading(false);
         }
-        setLoading(false);
       } else {
         setUser(null);
         setIsAdminUser(false);
         setIsAdminChecking(false);
-        // If not signed in, sign in anonymously to satisfy security rules
-        try {
-          await signInAnonymously(auth);
-          // onAuthStateChanged will fire again with the anonymous user
-        } catch (error) {
-          console.error("Error signing in anonymously:", error);
-          setLoading(false);
-        }
+        setLoading(false);
+        signInAnonymously(auth).catch(console.error);
       }
     });
 
@@ -2575,10 +2721,6 @@ export default function App() {
           ...data,
           sessionStatus: data.sessionStatus || 'waiting'
         });
-      } else {
-        // Initialize config if it doesn't exist
-        setDoc(doc(db, 'config', 'general'), { census: 500, sessionStatus: 'waiting' })
-          .catch(err => console.error("Error initializing config:", err));
       }
     }, (err) => {
       console.warn("Config listener error:", err);
@@ -2587,11 +2729,135 @@ export default function App() {
   }, []);
 
   const handleAdminLogin = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
     const provider = new GoogleAuthProvider();
+    // Force select account to help with iframe issues
+    provider.setCustomParameters({ prompt: 'select_account' });
+    
     try {
       await signInWithPopup(auth, provider);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      if (err.code === 'auth/popup-closed-by-user') {
+        toast.error('La ventana de inicio de sesión fue cerrada. Por favor, intenta de nuevo.');
+      } else if (err.code === 'auth/cancelled-by-user') {
+        // Ignore
+      } else {
+        console.error("Login error:", err);
+        toast.error('Error al iniciar sesión: ' + (err.message || 'Error desconocido'));
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleBulkLoad = async () => {
+    if (!confirm('¿Estás seguro de cargar los datos masivos? Esto agregará candidatos y mesas según el reporte de la I.E. Villa Margarita.')) return;
+    
+    setIsBulkLoading(true);
+    try {
+      const batch = writeBatch(db);
+      
+      // Add mesas
+      INITIAL_MESAS.forEach(mesa => {
+        const mesaRef = doc(collection(db, 'mesas'));
+        batch.set(mesaRef, {
+          ...mesa,
+          voterCount: 0,
+          createdAt: serverTimestamp()
+        });
+      });
+
+      // Add candidates
+      INITIAL_CANDIDATES.forEach(cand => {
+        const candRef = doc(collection(db, 'candidates'));
+        batch.set(candRef, {
+          ...cand,
+          photoUrl: '',
+          voteCount: 0,
+          createdAt: serverTimestamp()
+        });
+      });
+
+      await batch.commit();
+      toast.success('Carga masiva completada con éxito');
+    } catch (error) {
+      console.error(error);
+      toast.error('Error en la carga masiva');
+    } finally {
+      setIsBulkLoading(false);
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (!confirm('¿Estás seguro de REINICIAR LOS VOTOS? Esto borrará todos los votos registrados y pondrá los contadores a cero. Los candidatos y mesas se mantendrán. Esta acción no se puede deshacer.')) return;
+    
+    setIsBulkLoading(true);
+    try {
+      // Use batches for deletion (Firestore has a 500 operation limit per batch)
+      const deleteCollection = async (collectionName: string) => {
+        const snap = await getDocs(collection(db, collectionName));
+        if (snap.empty) return;
+        
+        // Process in chunks of 500
+        const docs = snap.docs;
+        for (let i = 0; i < docs.length; i += 500) {
+          const batch = writeBatch(db);
+          const chunk = docs.slice(i, i + 500);
+          chunk.forEach(d => batch.delete(doc(db, collectionName, d.id)));
+          await batch.commit();
+        }
+      };
+
+      // 1. Delete all votes
+      await deleteCollection('votes');
+      
+      // 2. Reset candidates voteCount to 0
+      const candSnap = await getDocs(collection(db, 'candidates'));
+      if (!candSnap.empty) {
+        const docs = candSnap.docs;
+        for (let i = 0; i < docs.length; i += 500) {
+          const batch = writeBatch(db);
+          const chunk = docs.slice(i, i + 500);
+          chunk.forEach(d => batch.update(doc(db, 'candidates', d.id), { voteCount: 0 }));
+          await batch.commit();
+        }
+      }
+
+      // 3. Reset mesas voterCount to 0
+      const mesaSnap = await getDocs(collection(db, 'mesas'));
+      if (!mesaSnap.empty) {
+        const docs = mesaSnap.docs;
+        for (let i = 0; i < docs.length; i += 500) {
+          const batch = writeBatch(db);
+          const chunk = docs.slice(i, i + 500);
+          chunk.forEach(d => batch.update(doc(db, 'mesas', d.id), { voterCount: 0 }));
+          await batch.commit();
+        }
+      }
+      
+      // 4. Reset config fully (keep census, institutionName, electionYear)
+      const configSnap = await getDoc(doc(db, 'config', 'general'));
+      const currentConfig = configSnap.exists() ? configSnap.data() : {};
+      
+      await setDoc(doc(db, 'config', 'general'), {
+        census: currentConfig.census || 500,
+        institutionName: currentConfig.institutionName || 'INSTITUCIÓN EDUCATIVA VILLA MARGARITA',
+        electionYear: currentConfig.electionYear || '2026',
+        sessionStatus: 'waiting',
+        sessionStart: null,
+        sessionEnd: null,
+        initialSnapshot: null,
+        finalSnapshot: null,
+        blancoVotes: { personeria: 0, contraloria: 0, consejo: 0 }
+      });
+      
+      toast.success('Votos reiniciados correctamente');
+    } catch (error) {
+      console.error(error);
+      toast.error('Error al reiniciar los votos');
+    } finally {
+      setIsBulkLoading(false);
     }
   };
 
@@ -2632,7 +2898,7 @@ export default function App() {
       return (
         <div className="min-h-screen bg-slate-900 flex flex-col">
           {/* Discreet Admin Access */}
-          <header className="p-6 flex justify-end">
+          <header className="p-4 md:p-6 flex justify-end">
              <button 
                onClick={() => window.location.hash = 'admin'}
                className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-slate-500 hover:bg-white/10 hover:text-white transition-all"
@@ -2642,33 +2908,33 @@ export default function App() {
              </button>
           </header>
 
-          <main className="flex-1 flex items-center justify-center p-6">
+          <main className="flex-1 flex items-center justify-center p-4 md:p-6">
             <motion.div 
               initial={{ y: 20, opacity: 0 }} 
               animate={{ y: 0, opacity: 1 }} 
-              className="max-w-5xl w-full bg-white rounded-[3rem] shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[600px]"
+              className="max-w-5xl w-full bg-white rounded-3xl md:rounded-[3rem] shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[500px] md:min-h-[600px]"
             >
               {/* Left Side: Info */}
-              <div className="md:w-1/2 bg-indigo-600 p-16 text-white flex flex-col justify-center relative overflow-hidden">
-                <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-white/10 rounded-full blur-3xl"></div>
-                <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-80 h-80 bg-indigo-400/20 rounded-full blur-3xl"></div>
+              <div className="md:w-1/2 bg-indigo-600 p-8 md:p-16 text-white flex flex-col justify-center relative overflow-hidden">
+                <div className="absolute top-0 right-0 -mr-20 -mt-20 w-64 h-64 md:w-80 md:h-80 bg-white/10 rounded-full blur-3xl"></div>
+                <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-64 h-64 md:w-80 md:h-80 bg-indigo-400/20 rounded-full blur-3xl"></div>
                 
                 <div className="relative z-10">
-                  <div className="w-24 h-24 bg-white/20 backdrop-blur-md rounded-[2rem] flex items-center justify-center mb-10 shadow-2xl border border-white/30">
-                    <School size={48} />
+                  <div className="w-16 h-16 md:w-24 md:h-24 bg-white/20 backdrop-blur-md rounded-2xl md:rounded-[2rem] flex items-center justify-center mb-6 md:mb-10 shadow-2xl border border-white/30">
+                    <School className="w-8 h-8 md:w-12 md:h-12" />
                   </div>
-                  <h1 className="text-5xl font-black mb-6 leading-tight tracking-tight">
+                  <h1 className="text-4xl md:text-5xl font-black mb-4 md:mb-6 leading-tight tracking-tight">
                     Elecciones <br />
                     Escolares <span className="text-indigo-200">{year}</span>
                   </h1>
-                  <p className="text-indigo-100/90 text-xl font-medium leading-relaxed">
-                    Plataforma oficial de votación digital para la <br />
+                  <p className="text-indigo-100/90 text-base md:text-xl font-medium leading-relaxed">
+                    Plataforma oficial de votación digital para la <br className="hidden md:block" />
                     <span className="font-bold text-white uppercase tracking-wide">{instName}</span>.
                   </p>
                   
-                  <div className="mt-16 flex items-center gap-4 bg-white/10 backdrop-blur-sm p-4 rounded-2xl w-fit border border-white/10">
-                    <div className={`w-4 h-4 rounded-full animate-pulse ${config.sessionStatus === 'active' ? 'bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.5)]' : 'bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.5)]'}`}></div>
-                    <span className="text-sm font-black uppercase tracking-[0.2em] text-indigo-50">
+                  <div className="mt-8 md:mt-16 flex items-center gap-3 md:gap-4 bg-white/10 backdrop-blur-sm p-3 md:p-4 rounded-xl md:rounded-2xl w-fit border border-white/10">
+                    <div className={`w-3 h-3 md:w-4 md:h-4 rounded-full animate-pulse ${config.sessionStatus === 'active' ? 'bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.5)]' : 'bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.5)]'}`}></div>
+                    <span className="text-xs md:text-sm font-black uppercase tracking-[0.2em] text-indigo-50">
                       Jornada {config.sessionStatus === 'active' ? 'Activa' : 'Inactiva'}
                     </span>
                   </div>
@@ -2676,32 +2942,32 @@ export default function App() {
               </div>
               
               {/* Right Side: Actions */}
-              <div className="md:w-1/2 p-16 flex flex-col justify-center bg-white">
-                <div className="mb-12">
-                  <h2 className="text-3xl font-black text-slate-900 mb-4">Bienvenido</h2>
-                  <p className="text-slate-500 text-lg">Selecciona una opción para continuar con el proceso electoral.</p>
+              <div className="md:w-1/2 p-8 md:p-16 flex flex-col justify-center bg-white">
+                <div className="mb-8 md:mb-12">
+                  <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-2 md:mb-4">Bienvenido</h2>
+                  <p className="text-slate-500 text-base md:text-lg">Selecciona una opción para continuar con el proceso electoral.</p>
                 </div>
                 
-                <div className="space-y-6">
+                <div className="space-y-4 md:space-y-6">
                   <button 
                     onClick={() => window.location.hash = 'voting'}
-                    className="w-full p-8 bg-slate-50 border-2 border-slate-100 rounded-[2rem] hover:border-indigo-600 hover:bg-indigo-50 transition-all group text-left flex items-center gap-8 shadow-sm hover:shadow-md"
+                    className="w-full p-6 md:p-8 bg-slate-50 border-2 border-slate-100 rounded-2xl md:rounded-[2rem] hover:border-indigo-600 hover:bg-indigo-50 transition-all group text-left flex items-center gap-4 md:gap-8 shadow-sm hover:shadow-md"
                   >
-                    <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-inner">
-                      <Settings size={32} />
+                    <div className="w-12 h-12 md:w-16 md:h-16 bg-indigo-100 text-indigo-600 rounded-xl md:rounded-2xl flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-inner shrink-0">
+                      <Settings className="w-6 h-6 md:w-8 md:h-8" />
                     </div>
                     <div>
-                      <h3 className="font-black text-slate-900 text-xl">Configurar Mesa</h3>
-                      <p className="text-slate-500 font-medium">Habilitar este dispositivo para recibir votos</p>
+                      <h3 className="font-black text-slate-900 text-lg md:text-xl">Configurar Mesa</h3>
+                      <p className="text-slate-500 font-medium text-sm md:text-base">Habilitar este dispositivo para recibir votos</p>
                     </div>
                   </button>
                 </div>
                 
-                <div className="mt-20 pt-8 border-t border-slate-100 flex flex-col items-center">
-                  <p className="text-slate-400 text-sm font-bold uppercase tracking-widest text-center">
+                <div className="mt-10 md:mt-20 pt-6 md:pt-8 border-t border-slate-100 flex flex-col items-center">
+                  <p className="text-slate-400 text-xs md:text-sm font-bold uppercase tracking-widest text-center">
                     © {year} {instName}
                   </p>
-                  <p className="text-slate-300 text-xs mt-2">Sistema de Gestión Electoral Institucional</p>
+                  <p className="text-slate-300 text-[10px] md:text-xs mt-2 text-center">Sistema de Gestión Electoral Institucional</p>
                 </div>
               </div>
             </motion.div>
@@ -2713,19 +2979,19 @@ export default function App() {
     if (view === 'admin') {
       if (!user || user.isAnonymous || isAdminChecking) {
         return (
-          <div className="min-h-screen flex items-center justify-center bg-slate-900 p-8 text-white text-center">
+          <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4 md:p-8 text-white text-center">
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="max-w-sm w-full">
-              <div className="w-24 h-24 bg-white/5 rounded-3xl flex items-center justify-center mx-auto mb-8 backdrop-blur-md border border-white/10 shadow-2xl">
+              <div className="w-20 h-20 md:w-24 md:h-24 bg-white/5 rounded-3xl flex items-center justify-center mx-auto mb-6 md:mb-8 backdrop-blur-md border border-white/10 shadow-2xl">
                 {isAdminChecking ? (
-                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-12 h-12 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full" />
+                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-10 h-10 md:w-12 md:h-12 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full" />
                 ) : (
-                  <ShieldCheck size={48} className="text-indigo-400" />
+                  <ShieldCheck className="w-10 h-10 md:w-12 md:h-12 text-indigo-400" />
                 )}
               </div>
-              <h2 className="text-3xl font-black mb-4 tracking-tight">
+              <h2 className="text-2xl md:text-3xl font-black mb-3 md:mb-4 tracking-tight">
                 {isAdminChecking ? 'Verificando...' : 'Acceso Restringido'}
               </h2>
-              <p className="text-slate-400 mb-12 leading-relaxed">
+              <p className="text-slate-400 mb-8 md:mb-12 leading-relaxed text-sm md:text-base">
                 {isAdminChecking ? 'Estamos validando tus credenciales de administrador.' : 'Solo personal autorizado puede acceder al panel de administración. Por favor, inicia sesión con tu cuenta institucional.'}
               </p>
               
@@ -2734,16 +3000,21 @@ export default function App() {
                   <button 
                     type="button"
                     onClick={handleAdminLogin}
-                    className="w-full py-5 bg-white text-slate-900 rounded-2xl font-black text-lg shadow-xl hover:bg-slate-100 transition-all flex items-center justify-center gap-4 mb-6 active:scale-95"
+                    disabled={isLoggingIn}
+                    className="w-full py-4 md:py-5 bg-white text-slate-900 rounded-2xl font-black text-base md:text-lg shadow-xl hover:bg-slate-100 transition-all flex items-center justify-center gap-3 md:gap-4 mb-6 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <img src="https://www.google.com/favicon.ico" alt="Google" className="w-6 h-6" />
-                    Continuar con Google
+                    {isLoggingIn ? (
+                      <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-5 h-5 md:w-6 md:h-6 border-2 border-slate-900/20 border-t-slate-900 rounded-full" />
+                    ) : (
+                      <img src="https://www.google.com/favicon.ico" alt="Google" className="w-5 h-5 md:w-6 md:h-6" />
+                    )}
+                    {isLoggingIn ? 'Iniciando sesión...' : 'Continuar con Google'}
                   </button>
                   
                   <button 
                     type="button"
                     onClick={() => window.location.hash = ''}
-                    className="mt-8 text-slate-500 hover:text-slate-300 transition-colors text-sm font-bold uppercase tracking-widest"
+                    className="mt-6 md:mt-8 text-slate-500 hover:text-slate-300 transition-colors text-xs md:text-sm font-bold uppercase tracking-widest"
                   >
                     Volver al Inicio
                   </button>
@@ -2784,7 +3055,7 @@ export default function App() {
         );
       }
 
-      return <AdminDashboard onLogout={() => signOut(auth)} />;
+      return <AdminDashboard onLogout={() => signOut(auth)} handleBulkLoad={handleBulkLoad} handleClearAll={handleClearAll} isBulkLoading={isBulkLoading} />;
     }
 
     // Voting View

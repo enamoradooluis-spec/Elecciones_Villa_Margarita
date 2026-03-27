@@ -1,50 +1,199 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: admin_emails
+    // Fields:
+    //   - email: string (required, email)
+    //   - enabled: bool (required)
+    //
+    // Collection: config
+    // Fields:
+    //   - census: number (required)
+    //   - adminPin: string (optional)
+    //   - sessionStatus: string (required, enum: ['waiting', 'active', 'ended'])
+    //   - sessionStart: timestamp (optional)
+    //   - sessionEnd: timestamp (optional)
+    //   - institutionName: string (optional)
+    //   - electionYear: string (optional)
+    //   - blancoVotes: map (optional)
+    //
+    // Collection: candidates
+    // Fields:
+    //   - name: string (required)
+    //   - photoUrl: string (optional)
+    //   - position: string (required, enum: ['personeria', 'contraloria', 'consejo'])
+    //   - grade: string (optional)
+    //   - number: number (required)
+    //   - voteCount: number (optional)
+    //
+    // Collection: voters
+    // Fields:
+    //   - name: string (required)
+    //   - grade: string (required)
+    //   - hasVoted: bool (required)
+    //
+    // Collection: mesas
+    // Fields:
+    //   - name: string (required)
+    //   - grade: string (required)
+    //   - pin: string (required)
+    //   - voterCount: number (optional)
+    //   - createdAt: timestamp (optional)
+    //
+    // Collection: votes
+    // Fields:
+    //   - candidateId: string (required)
+    //   - position: string (required)
+    //   - grade: string (required)
+    //   - mesaId: string (optional)
+    //   - mesaName: string (optional)
+    //   - timestamp: timestamp (required)
+    //   - voterId: string (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
     function isAuthenticated() {
       return request.auth != null;
     }
 
     function isAdmin() {
-      return isAuthenticated() &&
-        request.auth.token.email != null &&
-        (request.auth.token.email == "enamoradooluis@gmail.com" ||
-         exists(/databases/$(database)/documents/admin_emails/$(request.auth.token.email)));
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/admin_emails/$(request.auth.token.email)) ||
+        (request.auth.token.email == "archivosmipc14@gmail.com" && request.auth.token.email_verified == true)
+      );
     }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // ===============================================================
+    // Validation Functions
+    // ===============================================================
+
+    function isValidCandidate(data) {
+      return hasRequiredFields(['name', 'position', 'number']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.position in ['personeria', 'contraloria', 'consejo'] &&
+             data.number is number &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() < 100000)) &&
+             (!('grade' in data) || (data.grade is string && data.grade.size() < 20)) &&
+             (!('voteCount' in data) || data.voteCount is number);
+    }
+
+    function isValidVoter(data) {
+      return hasRequiredFields(['name', 'grade', 'hasVoted']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.grade is string && data.grade.size() > 0 && data.grade.size() < 20 &&
+             data.hasVoted is bool;
+    }
+
+    function isValidMesa(data) {
+      return hasRequiredFields(['name', 'grade', 'pin']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.grade is string && data.grade.size() > 0 && data.grade.size() < 20 &&
+             data.pin is string && data.pin.size() > 0 && data.pin.size() < 20 &&
+             (!('voterCount' in data) || data.voterCount is number);
+    }
+
+    function isValidVote(data) {
+      return hasRequiredFields(['candidateId', 'position', 'grade', 'voterId', 'timestamp']) &&
+             data.candidateId is string &&
+             data.position in ['personeria', 'contraloria', 'consejo'] &&
+             data.grade is string &&
+             data.voterId is string &&
+             data.timestamp is timestamp;
+    }
+
+    function isValidConfig(data) {
+      return hasRequiredFields(['census', 'sessionStatus']) &&
+             data.census is number &&
+             data.sessionStatus in ['waiting', 'active', 'ended'] &&
+             (!('adminPin' in data) || (data.adminPin is string && data.adminPin.size() < 20)) &&
+             (!('institutionName' in data) || (data.institutionName is string && data.institutionName.size() < 200)) &&
+             (!('electionYear' in data) || (data.electionYear is string && data.electionYear.size() < 10));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
 
     match /admin_emails/{email} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow write: if isAdmin();
-    }
-
     match /config/{docId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
-    }
-
-    match /mesas/{mesaId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read: if true; // Publicly readable for voting status
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        docId == 'general' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blancoVotes'])
+      );
     }
 
     match /candidates/{candidateId} {
       allow read: if true;
-      allow write: if isAuthenticated();
-    }
-
-    match /votes/{voteId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow create, delete: if isAdmin();
+      // Allow incrementing voteCount during voting
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voteCount']) &&
+        (
+          (request.resource.data.voteCount == 1 && !('voteCount' in resource.data)) ||
+          (request.resource.data.voteCount == resource.data.voteCount + 1)
+        )
+      );
     }
 
     match /voters/{voterId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || isAuthenticated();
+      allow update: if isAdmin() || (isAuthenticated() && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hasVoted']) &&
+                    request.resource.data.hasVoted == true && resource.data.hasVoted == false);
+      allow delete: if isAdmin();
+    }
+
+    match /mesas/{mesaId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isAuthenticated() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voterCount']) &&
+        (
+          (request.resource.data.voterCount == 1 && !('voterCount' in resource.data)) ||
+          (request.resource.data.voterCount == resource.data.voterCount + 1)
+        )
+      );
+    }
+
+    match /votes/{voteId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && isValidVote(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
     }
   }
 }
